@@ -33,23 +33,33 @@ class DatabricksDBSQLConnector(BaseOLAPConnector):
         catalog: str | None = None,
         schema: str | None = None,
         time_column_map: dict[str, str] | None = None,
+        entity_key_fields: tuple[str, ...] | None = None,
+        consistency: ConsistencyGuarantee | None = None,
+        staleness_sec: float | None = None,
     ) -> None:
         super().__init__(
             executor=executor,
             connector_id=connector_id,
             source_system=source_system,
             available_entities=available_entities,
+            entity_key_fields=entity_key_fields,
         )
         self._catalog = catalog
         self._schema = schema
         self._time_column_map = time_column_map or {}
+        self._consistency_override = consistency
+        self._staleness_override = staleness_sec
 
     @property
     def default_staleness_sec(self) -> float:
+        if self._staleness_override is not None:
+            return self._staleness_override
         return 600.0
 
     @property
     def default_consistency(self) -> ConsistencyGuarantee:
+        if self._consistency_override is not None:
+            return self._consistency_override
         return ConsistencyGuarantee.STRONG
 
     def get_performance(self) -> ConnectorPerformance:

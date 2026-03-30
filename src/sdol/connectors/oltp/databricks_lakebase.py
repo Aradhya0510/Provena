@@ -33,12 +33,14 @@ class DatabricksLakebaseConnector(BaseOLTPConnector):
         available_entities: list[str] | None = None,
         catalog: str | None = None,
         schema: str | None = None,
+        entity_key_fields: tuple[str, ...] | None = None,
     ) -> None:
         super().__init__(
             executor=executor,
             connector_id=connector_id,
             source_system=source_system,
             available_entities=available_entities,
+            entity_key_fields=entity_key_fields,
         )
         self._catalog = catalog
         self._schema = schema

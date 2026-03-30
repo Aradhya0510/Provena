@@ -233,3 +233,36 @@ class TestLakebaseQueryBuilder:
         )
         query = build_lakebase_point_lookup(intent)
         assert "LIMIT 5" in query.sql
+
+
+class TestLakebaseEntityKeyFields:
+    @pytest.mark.asyncio
+    async def test_custom_entity_key_fields(self) -> None:
+        executor = MockQueryExecutor(
+            records=[{"machine_id": "EXC-0342", "status": "online"}]
+        )
+        connector = DatabricksLakebaseConnector(
+            executor=executor,
+            entity_key_fields=("machine_id",),
+        )
+        intent = PointLookupIntent(
+            id="i-1",
+            entity="fleet_machines",
+            identifier={"machine_id": "EXC-0342"},
+        )
+        result = await connector.execute(intent)
+        assert result.entity_keys == ["EXC-0342"]
+
+    @pytest.mark.asyncio
+    async def test_default_key_fields_backward_compat(self) -> None:
+        executor = MockQueryExecutor(
+            records=[{"customer_id": "C-1", "name": "Alice"}]
+        )
+        connector = DatabricksLakebaseConnector(executor=executor)
+        intent = PointLookupIntent(
+            id="i-1",
+            entity="customer",
+            identifier={"customer_id": "C-1"},
+        )
+        result = await connector.execute(intent)
+        assert result.entity_keys == ["C-1"]

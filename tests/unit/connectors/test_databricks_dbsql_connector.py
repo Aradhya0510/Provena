@@ -11,6 +11,7 @@ from sdol.connectors.olap.databricks_dbsql_query import (
 from sdol.connectors.executor import MockQueryExecutor
 from sdol.types.context import ContextSlotType
 from sdol.types.errors import InvalidIntentError
+from sdol.types.provenance import ConsistencyGuarantee
 from sdol.types.intent import (
     AggregateAnalysisIntent,
     FilterClause,
@@ -361,3 +362,98 @@ class TestTimeColumnMap:
         assert "order_date" in native_sql
         assert "timestamp" not in native_sql
         assert result.slot_type == ContextSlotType.TEMPORAL
+
+
+class TestEntityKeyFields:
+    @pytest.mark.asyncio
+    async def test_default_entity_keys_detect_customer_id(self) -> None:
+        executor = MockQueryExecutor(
+            records=[{"customer_id": "C-1", "revenue": 100}]
+        )
+        connector = DatabricksDBSQLConnector(executor=executor)
+        intent = AggregateAnalysisIntent(
+            id="i-1",
+            entity="orders",
+            measures=[MeasureSpec(field="revenue", aggregation="sum")],
+            dimensions=["customer_id"],
+        )
+        result = await connector.execute(intent)
+        assert result.entity_keys == ["C-1"]
+
+    @pytest.mark.asyncio
+    async def test_custom_entity_key_fields(self) -> None:
+        executor = MockQueryExecutor(
+            records=[{"machine_id": "EXC-0342", "avg_temp": 95.0}]
+        )
+        connector = DatabricksDBSQLConnector(
+            executor=executor,
+            entity_key_fields=("machine_id",),
+        )
+        intent = AggregateAnalysisIntent(
+            id="i-1",
+            entity="telemetry",
+            measures=[MeasureSpec(field="temp", aggregation="avg")],
+            dimensions=["machine_id"],
+        )
+        result = await connector.execute(intent)
+        assert result.entity_keys == ["EXC-0342"]
+
+    @pytest.mark.asyncio
+    async def test_missing_key_returns_none(self) -> None:
+        executor = MockQueryExecutor(
+            records=[{"region": "west", "cnt": 10}]
+        )
+        connector = DatabricksDBSQLConnector(
+            executor=executor,
+            entity_key_fields=("machine_id",),
+        )
+        intent = AggregateAnalysisIntent(
+            id="i-1",
+            entity="stats",
+            measures=[MeasureSpec(field="cnt", aggregation="count")],
+            dimensions=["region"],
+        )
+        result = await connector.execute(intent)
+        assert result.entity_keys is None
+
+
+class TestConsistencyOverride:
+    def test_default_consistency_is_strong(self) -> None:
+        connector = DatabricksDBSQLConnector(executor=MockQueryExecutor())
+        assert connector.default_consistency == ConsistencyGuarantee.STRONG
+
+    def test_override_consistency_to_eventual(self) -> None:
+        connector = DatabricksDBSQLConnector(
+            executor=MockQueryExecutor(),
+            consistency=ConsistencyGuarantee.EVENTUAL,
+        )
+        assert connector.default_consistency == ConsistencyGuarantee.EVENTUAL
+
+    def test_default_staleness(self) -> None:
+        connector = DatabricksDBSQLConnector(executor=MockQueryExecutor())
+        assert connector.default_staleness_sec == 600.0
+
+    def test_override_staleness(self) -> None:
+        connector = DatabricksDBSQLConnector(
+            executor=MockQueryExecutor(),
+            staleness_sec=900.0,
+        )
+        assert connector.default_staleness_sec == 900.0
+
+    @pytest.mark.asyncio
+    async def test_provenance_reflects_overrides(self) -> None:
+        executor = MockQueryExecutor(records=[{"region": "west", "cnt": 5}])
+        connector = DatabricksDBSQLConnector(
+            executor=executor,
+            consistency=ConsistencyGuarantee.EVENTUAL,
+            staleness_sec=900.0,
+        )
+        intent = AggregateAnalysisIntent(
+            id="i-1",
+            entity="telemetry",
+            measures=[MeasureSpec(field="cnt", aggregation="count")],
+            dimensions=["region"],
+        )
+        result = await connector.execute(intent)
+        assert result.provenance.consistency == ConsistencyGuarantee.EVENTUAL
+        assert result.provenance.staleness_window_sec == 900.0

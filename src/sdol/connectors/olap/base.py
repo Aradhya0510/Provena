@@ -51,17 +51,21 @@ class BaseOLAPConnector(BaseConnector, ABC):
         - ``normalize_result()`` (rarely needed)
     """
 
+    _DEFAULT_KEY_FIELDS: tuple[str, ...] = ("customer_id", "id", "entity_id")
+
     def __init__(
         self,
         executor: QueryExecutor,
         connector_id: str,
         source_system: str = "olap.generic",
         available_entities: list[str] | None = None,
+        entity_key_fields: tuple[str, ...] | None = None,
     ) -> None:
         self._executor = executor
         self._id = connector_id
         self._source_system = source_system
         self._available_entities = available_entities or []
+        self._entity_key_fields = entity_key_fields or self._DEFAULT_KEY_FIELDS
 
     # -- Properties --------------------------------------------------------
 
@@ -153,7 +157,7 @@ class BaseOLAPConnector(BaseConnector, ABC):
                 total_available=raw.get("meta", {}).get("total_available"),
             ),
             slot_type=slot_type,
-            entity_keys=extract_entity_keys(records),
+            entity_keys=extract_entity_keys(records, self._entity_key_fields),
             meta=ConnectorResultMeta(
                 execution_ms=execution_ms,
                 record_count=len(records),
