@@ -70,7 +70,7 @@ Each layer is independent and composable:
 - **Context layer** — assembles typed slots, detects cross-source conflicts, resolves via heuristics
 - **Epistemic layer** — aggregates trust signals into an LLM-injectable prompt
 
-For the full technical deep-dive, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For the full technical deep-dive, see [Architecture](docs/architecture.md).
 
 ---
 
@@ -80,7 +80,7 @@ For the full technical deep-dive, see [ARCHITECTURE.md](ARCHITECTURE.md).
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-python -m pytest tests/ -v   # 206 tests
+python -m pytest tests/ -v   # 226 tests
 ```
 
 ```python
@@ -149,12 +149,15 @@ All connectors use the `QueryExecutor` protocol — swap `MockQueryExecutor` for
 
 ## Documentation
 
+All documentation lives in the [`docs/`](docs/) directory. See the [documentation index](docs/README.md) for a complete guide.
+
 | Document | Description |
 |----------|-------------|
-| [Getting Started](GETTING_STARTED.md) | Installation, setup, and basic working examples |
-| [Architecture](ARCHITECTURE.md) | Detailed system design — layers, data flow, type system |
-| [Typed Connectors Guide](TYPED_CONNECTORS_GUIDE.md) | Using built-in connectors and building custom ones |
-| [Databricks Guide](DATABRICKS_GUIDE.md) | DBSQL and Lakebase integration with Unity Catalog |
+| [Getting Started](docs/getting-started.md) | Installation, setup, and basic working examples |
+| [Architecture](docs/architecture.md) | Detailed system design — layers, data flow, type system |
+| [Typed Connectors Guide](docs/typed-connectors-guide.md) | Using built-in connectors and building custom ones |
+| [Databricks Guide](docs/databricks-guide.md) | DBSQL and Lakebase integration with Unity Catalog |
+| [Implementation Spec](docs/implementation-spec.md) | Original milestone-based implementation specification |
 
 ---
 
@@ -170,7 +173,8 @@ python examples/with_mcp_server.py      # MCP adapter integration
 
 ## Project Stats
 
-- 61 Python source files in `src/sdol/`
-- 22 test files, 206 tests passing
+- 49 Python source files in `src/sdol/`
+- 24 test files, 226 tests passing
 - 3 example scripts
+- 5 benchmark scripts in `databricks_test/`
 - Zero external runtime dependencies beyond Pydantic v2

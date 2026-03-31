@@ -24,3 +24,7 @@ Thumbs.db
 
 # Cursor
 .cursor/
+
+# AI context files
+claude.md
+CLAUDE.md

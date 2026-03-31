@@ -44,38 +44,38 @@ This document provides a detailed technical walkthrough of SDOL's internal archi
 SDOL is organized into nine composable layers, each with a single responsibility:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Layer 2: Agent SDK                                         │
-│  SDOL (public API) + IntentFormulator (builders)            │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 3: Semantic Router                                   │
-│  SemanticRouter → QueryPlanner → IntentDecomposer           │
-│                                → CostEstimator              │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 4: Typed Connectors (three-tier)                     │
-│  Foundation: BaseConnector (4-stage pipeline)               │
-│  Paradigm:   BaseOLAPConnector │ BaseOLTPConnector │ BaseDoc│
-│  Providers:  Generic/Databricks OLAP │ Generic/Lakebase OLTP│
-│  CapabilityRegistry (routing + scoring)                     │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 5: Context Assembly                                  │
-│  ContextCompiler → ConflictDetector → ConflictResolver      │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 6: Provenance & Trust                                │
-│  ProvenanceEnvelope + TrustScorer (4-dimension scoring)     │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 7: Epistemic Tracking                                │
-│  EpistemicTracker → generate_epistemic_prompt()             │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 8: MCP Integration                                   │
-│  MCPAdapter + ResponseWrapper                               │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 9: Join Optimizer                                    │
-│  JoinOptimizer (push-down, hash-materialize, etc.)          │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 1: Type System (foundation)                          │
-│  Pydantic v2 models: Intent, Provenance, Context, Caps     │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  Layer 2: Agent SDK                                              │
+│  SDOL (public API) + IntentFormulator (builders)                 │
+├──────────────────────────────────────────────────────────────────┤
+│  Layer 3: Semantic Router                                        │
+│  SemanticRouter → QueryPlanner → IntentDecomposer                │
+│                                → CostEstimator                   │
+├──────────────────────────────────────────────────────────────────┤
+│  Layer 4: Typed Connectors (three-tier)                          │
+│  Foundation: BaseConnector (4-stage pipeline)                    │
+│  Paradigm:   BaseOLAPConnector │ BaseOLTPConnector │ BaseDocConn │
+│  Providers:  Generic/Databricks OLAP │ Generic/Lakebase OLTP    │
+│  CapabilityRegistry (routing + scoring)                          │
+├──────────────────────────────────────────────────────────────────┤
+│  Layer 5: Context Assembly                                       │
+│  ContextCompiler → ConflictDetector → ConflictResolver           │
+├──────────────────────────────────────────────────────────────────┤
+│  Layer 6: Provenance & Trust                                     │
+│  ProvenanceEnvelope + TrustScorer (4-dimension scoring)          │
+├──────────────────────────────────────────────────────────────────┤
+│  Layer 7: Epistemic Tracking                                     │
+│  EpistemicTracker → generate_epistemic_prompt()                  │
+├──────────────────────────────────────────────────────────────────┤
+│  Layer 8: MCP Integration                                        │
+│  MCPAdapter + ResponseWrapper + ProtocolExtensions               │
+├──────────────────────────────────────────────────────────────────┤
+│  Layer 9: Join Optimizer                                         │
+│  JoinOptimizer (push-down, hash-materialize, etc.)               │
+├──────────────────────────────────────────────────────────────────┤
+│  Layer 1: Type System (foundation)                               │
+│  Pydantic v2 models: Intent, Provenance, Context, Caps          │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -392,11 +392,11 @@ Assembles raw connector results into a `ContextFrame`:
 2. **`compile()`** — groups elements into `ContextSlot`s by `ContextSlotType`, assigns interpretation notes per slot type, runs conflict detection/resolution, computes stats
 
 **Interpretation notes** per slot type:
-- `STRUCTURED` → "Structured data from direct queries and aggregations"
-- `TEMPORAL` → "Time-series data showing trends and changes"
-- `UNSTRUCTURED` → "Unstructured content from similarity-based retrieval"
-- `RELATIONAL` → "Relationship data from graph traversals"
-- `INFERRED` → "Inferred data from reasoning engines"
+- `STRUCTURED` → "Tabular data. Numbers are precise within query scope. NULLs mean absent, not unknown. Trust provenance precision class for confidence."
+- `TEMPORAL` → "Time-series data. Always check window and granularity. Trends are computed within the stated window — do not extrapolate beyond it."
+- `UNSTRUCTURED` → "Natural language text. Apply standard NLP-level caution. Claims are assertions, not verified facts. Cross-reference with structured data."
+- `RELATIONAL` → "Relationship data. Absence of an edge means not-found, not does-not-exist. Check traversal depth limits before assuming completeness."
+- `INFERRED` → "Derived by formal reasoning. Validity depends on ontology correctness. Uses open-world assumption: absence of entailment is not negation."
 
 ### ConflictDetector
 
@@ -430,11 +430,11 @@ Produces a `TrustScore` from a `ProvenanceEnvelope` across four dimensions:
 | **Authority** | `source_authority_map.get(source_system, 0.5)` | 0.2 |
 | **Consistency** | Lookup: `strong → 1.0`, `read_committed → 0.8`, `eventual → 0.5`, `best_effort → 0.2` | 0.3 |
 | **Freshness** | `max(0, 1 - (age / staleness_window) / 2)` — null staleness → 0.5 | 0.2 |
-| **Precision** | Lookup: `exact → 1.0`, `exact_aggregate → 0.95`, `estimated → 0.6`, `predicted → 0.5`, `heuristic → 0.3`, `similarity_ranked → 0.7`, `logically_entailed → 0.85` | 0.3 |
+| **Precision** | Lookup: `exact → 1.0`, `exact_aggregate → 0.95`, `logically_entailed → 0.9`, `estimated → 0.6`, `similarity_ranked → 0.55`, `predicted → 0.5`, `heuristic → 0.3` | 0.3 |
 
 **Composite** = weighted sum, clamped to [0, 1].
 
-**Label** thresholds: >= 0.75 → `high`, >= 0.5 → `medium`, >= 0.25 → `low`, else `uncertain`.
+**Label** thresholds: >= 0.8 → `high`, >= 0.55 → `medium`, >= 0.3 → `low`, else `uncertain`.
 
 `TrustScorerConfig` allows custom weights and authority maps per source system.
 
@@ -545,10 +545,12 @@ src/sdol/
 │   ├── context/
 │   │   ├── context_compiler.py          # assembles ContextFrame
 │   │   ├── conflict_detector.py         # cross-source conflict detection
-│   │   └── conflict_resolver.py         # heuristic resolution
+│   │   ├── conflict_resolver.py         # heuristic resolution
+│   │   └── typed_slot.py               # interpretation notes per slot type
 │   ├── epistemic/
 │   │   └── epistemic_tracker.py         # session-level confidence tracking
 │   ├── provenance/
+│   │   ├── envelope.py                  # ProvenanceEnvelope factory functions
 │   │   └── trust_scorer.py              # 4-dimension trust scoring
 │   └── router/
 │       ├── semantic_router.py           # main orchestrator
@@ -558,15 +560,21 @@ src/sdol/
 │       └── join_optimizer.py            # cross-source join strategies
 ├── mcp/
 │   ├── mcp_adapter.py                   # MCP server management
-│   └── response_wrapper.py             # MCP → ProvenanceEnvelope
-└── types/
-    ├── intent.py                        # 8 intent types + discriminated union
-    ├── provenance.py                    # provenance enums + envelope + trust
-    ├── context.py                       # context frame, slots, conflicts
-    ├── capability.py                    # connector capability declarations
-    ├── connector.py                     # connector result + health types
-    ├── errors.py                        # typed error hierarchy
-    └── router.py                        # execution plan + step types
+│   ├── response_wrapper.py              # MCP → ProvenanceEnvelope
+│   └── protocol_extensions.py           # SDOL metadata envelope for MCP
+├── types/
+│   ├── __init__.py                      # type re-exports
+│   ├── intent.py                        # 8 intent types + discriminated union
+│   ├── provenance.py                    # provenance enums + envelope + trust
+│   ├── context.py                       # context frame, slots, conflicts
+│   ├── capability.py                    # connector capability declarations
+│   ├── connector.py                     # connector result + health types
+│   ├── errors.py                        # typed error hierarchy
+│   └── router.py                        # execution plan + step types
+└── utils/
+    ├── hashing.py                       # deterministic hashing for entity resolution
+    ├── timer.py                         # execution timer context manager
+    └── logger.py                        # structured logger
 ```
 
 ---

@@ -114,7 +114,7 @@ dbsql = DatabricksDBSQLConnector(
 )
 ```
 
-See [Databricks Guide](DATABRICKS_GUIDE.md) for full DBSQL details.
+See [Databricks Guide](databricks-guide.md) for full DBSQL details.
 
 ### OLTP Paradigm
 
@@ -146,7 +146,7 @@ lakebase = DatabricksLakebaseConnector(
 )
 ```
 
-See [Databricks Guide](DATABRICKS_GUIDE.md) for full Lakebase details.
+See [Databricks Guide](databricks-guide.md) for full Lakebase details.
 
 ### Document Paradigm
 

@@ -3,9 +3,9 @@
 This guide covers installation, setup, and basic working examples to get you up and running with SDOL (Semantic Data Orchestration Layer).
 
 For deeper topics, see:
-- [Architecture](ARCHITECTURE.md) — detailed system design
-- [Typed Connectors Guide](TYPED_CONNECTORS_GUIDE.md) — connector usage and building custom connectors
-- [Databricks Guide](DATABRICKS_GUIDE.md) — Databricks-specific integration via DBSQL and Lakebase
+- [Architecture](architecture.md) — detailed system design
+- [Typed Connectors Guide](typed-connectors-guide.md) — connector usage and building custom connectors
+- [Databricks Guide](databricks-guide.md) — Databricks-specific integration via DBSQL and Lakebase
 
 ---
 
@@ -31,7 +31,7 @@ Verify everything works:
 python -m pytest tests/ -v
 ```
 
-You should see all 206 tests passing.
+You should see all 226 tests passing.
 
 ---
 
@@ -312,6 +312,6 @@ python examples/with_mcp_server.py      # MCP adapter integration
 
 ## Next Steps
 
-- [Architecture](ARCHITECTURE.md) — understand how the layers interact
-- [Typed Connectors Guide](TYPED_CONNECTORS_GUIDE.md) — use built-in connectors or build your own
-- [Databricks Guide](DATABRICKS_GUIDE.md) — DBSQL and Lakebase integration
+- [Architecture](architecture.md) — understand how the layers interact
+- [Typed Connectors Guide](typed-connectors-guide.md) — use built-in connectors or build your own
+- [Databricks Guide](databricks-guide.md) — DBSQL and Lakebase integration
