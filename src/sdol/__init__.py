@@ -14,12 +14,18 @@ from sdol.core.context.context_compiler import ContextCompiler
 from sdol.core.epistemic.epistemic_tracker import EpistemicTracker
 from sdol.core.provenance.trust_scorer import TrustScorer
 from sdol.core.router.semantic_router import SemanticRouter
-from sdol.extensions.databricks.document.vector_search import (
-    DatabricksVectorSearchConnector,
-)
-from sdol.extensions.databricks.olap.dbsql import DatabricksDBSQLConnector
-from sdol.extensions.databricks.oltp.lakebase import DatabricksLakebaseConnector
 from sdol.mcp.mcp_adapter import MCPAdapter
+
+try:
+    from sdol.extensions.databricks.document.vector_search import (
+        DatabricksVectorSearchConnector,
+    )
+    from sdol.extensions.databricks.olap.dbsql import DatabricksDBSQLConnector
+    from sdol.extensions.databricks.oltp.lakebase import DatabricksLakebaseConnector
+except ImportError:
+    DatabricksDBSQLConnector = None  # type: ignore[assignment,misc]
+    DatabricksLakebaseConnector = None  # type: ignore[assignment,misc]
+    DatabricksVectorSearchConnector = None  # type: ignore[assignment,misc]
 
 __all__ = [
     "SDOL",

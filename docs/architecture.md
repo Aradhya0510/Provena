@@ -299,7 +299,7 @@ Connectors follow a three-tier architecture:
 
 1. **Foundation** — `BaseConnector` defines the 4-stage pipeline contract and `QueryExecutor` protocol. These rarely change.
 2. **Paradigm bases** — `BaseOLAPConnector`, `BaseOLTPConnector`, `BaseDocumentConnector` encode what it *means* to be a connector of that paradigm: supported intent types, shared `interpret_intent` validation, shared `normalize_result` with paradigm-appropriate provenance defaults. Providers only override `synthesize_query()` and `get_performance()`.
-3. **Provider extensions** — Generic connectors (`GenericOLAPConnector`, `GenericOLTPConnector`, `GenericDocumentConnector`) live in `src/sdol/connectors/` under their paradigm directories. Databricks-specific connectors (`DatabricksDBSQLConnector`, `DatabricksLakebaseConnector`, `DatabricksVectorSearchConnector`) live in `extensions/databricks/` — separated from core to keep `src/` clean as new providers are added.
+3. **Provider extensions** — Generic connectors (`GenericOLAPConnector`, `GenericOLTPConnector`, `GenericDocumentConnector`) live in `src/sdol/connectors/` under their paradigm directories. Databricks-specific connectors (`DatabricksDBSQLConnector`, `DatabricksLakebaseConnector`, `DatabricksVectorSearchConnector`) live in `src/sdol/extensions/databricks/` and are installed via `pip install sdol[databricks]`.
 
 ### BaseConnector Pipeline (Foundation)
 
@@ -341,13 +341,14 @@ Shared utilities (`OPERATOR_MAP`, `qualify_table`, `extract_entity_keys`) live i
 
 ### Provider Extensions
 
-Provider-specific connectors live in `extensions/` (alongside `src/`, not under it). This keeps the core `src/sdol/` clean — only base classes and generic reference implementations live there.
+Provider-specific connectors live in `src/sdol/extensions/` and use the **extras/optional dependencies** pattern — install with `pip install sdol[<provider>]`.
 
 Adding a new provider (e.g., BigQuery for OLAP, Postgres for OLTP) requires:
-1. One new file under `extensions/<provider>/<paradigm>/` (e.g., `extensions/bigquery/olap/bigquery.py`)
+1. One new file under `src/sdol/extensions/<provider>/<paradigm>/` (e.g., `src/sdol/extensions/bigquery/olap/bigquery.py`)
 2. One query builder file with the native query dataclass + builder functions
 3. Subclass the paradigm base, implement `synthesize_query()` + `get_performance()`
-4. Register it — routing, trust scoring, context compilation, and MCP wrapping work automatically
+4. Add an optional-dependency group to `pyproject.toml` (e.g., `bigquery = ["google-cloud-bigquery>=3.0"]`)
+5. Register it — routing, trust scoring, context compilation, and MCP wrapping work automatically
 
 Import path: `sdol.extensions.<provider>.<paradigm>.<module>` (e.g., `sdol.extensions.databricks.olap.dbsql`). All Databricks connectors are also re-exported from `sdol.__init__` for convenience.
 
@@ -516,11 +517,14 @@ Different connectors?    → HASH_MATERIALIZE (build on smaller side)
 ## Directory Structure
 
 ```
-src/sdol/                                 # Core package — no provider-specific code
+src/sdol/                                 # Core package + provider extensions
 ├── __init__.py                           # public exports (re-exports extensions for convenience)
 ├── extensions/
 │   ├── __init__.py                       # namespace marker
-│   └── databricks -> ../../../extensions/databricks  # dev symlink
+│   └── databricks/                       # pip install sdol[databricks]
+│       ├── olap/dbsql.py                 # DatabricksDBSQLConnector
+│       ├── oltp/lakebase.py              # DatabricksLakebaseConnector
+│       └── document/vector_search.py     # DatabricksVectorSearchConnector
 ├── agent/
 │   ├── agent_sdk.py                      # SDOL class (public API)
 │   └── intent_formulator.py              # intent builders
@@ -575,18 +579,9 @@ src/sdol/                                 # Core package — no provider-specifi
     ├── timer.py                          # execution timer context manager
     └── logger.py                         # structured logger
 
-extensions/                               # Provider extensions — separate from core
-└── databricks/
-    ├── __init__.py                       # Databricks provider package
-    ├── olap/
-    │   ├── dbsql.py                      # DatabricksDBSQLConnector
-    │   └── dbsql_query.py                # Photon/Delta-optimized SQL builder
-    ├── oltp/
-    │   ├── lakebase.py                   # DatabricksLakebaseConnector
-    │   └── lakebase_query.py             # Lakebase row-index-optimized builder
-    └── document/
-        ├── vector_search.py              # DatabricksVectorSearchConnector
-        └── vector_search_query.py        # VS API query builder (ANN / HYBRID)
+tests/                                    # Unit + integration tests
+├── unit/                                # per-module unit tests
+└── integration/                         # end-to-end pipeline tests
 ```
 
 ---

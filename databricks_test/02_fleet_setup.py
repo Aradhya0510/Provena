@@ -356,7 +356,7 @@ else:
 
 existing_indexes = [
     idx["name"]
-    for idx in vsc.list_indexes(endpoint_name=VS_ENDPOINT_NAME).get("vector_indexes", [])
+    for idx in vsc.list_indexes(name=VS_ENDPOINT_NAME).get("vector_indexes", [])
 ]
 
 source_table = f"{CATALOG}.{SCHEMA}.maintenance_logs"

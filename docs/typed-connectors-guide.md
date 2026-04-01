@@ -49,19 +49,20 @@ Connectors are organized in three layers:
 │  Shared: interpret_intent, normalize_result, capabilities   │
 ├────────────────────────────────────────────────────────────┤
 │  Layer 3: Provider Extensions (highly extensible)           │
-│  Core: GenericOLAP, GenericOLTP, GenericDocument (src/)     │
-│  Databricks: DBSQL, Lakebase, VectorSearch (extensions/)   │
+│  Core: GenericOLAP, GenericOLTP, GenericDocument             │
+│  Databricks: DBSQL, Lakebase, VectorSearch                  │
 │  Only implements: synthesize_query + get_performance        │
 └────────────────────────────────────────────────────────────┘
 ```
 
 **Adding a new provider** (e.g., BigQuery OLAP, Postgres OLTP) requires:
-1. One new file under `extensions/<provider>/<paradigm>/`
+1. One new file under `src/sdol/extensions/<provider>/<paradigm>/`
 2. One query builder with native query dataclass + builder functions
 3. Subclass the paradigm base, implement `synthesize_query()` + `get_performance()`
-4. Register it — routing, trust scoring, and context compilation work automatically
+4. Add an optional-dependency group to `pyproject.toml` (e.g., `bigquery = [...]`)
+5. Register it — routing, trust scoring, and context compilation work automatically
 
-Provider extensions live in `extensions/` alongside `src/`, keeping core clean. Import path: `sdol.extensions.<provider>.<paradigm>.<module>`.
+Provider extensions live in `src/sdol/extensions/` and use the extras/optional dependencies pattern. Install with `pip install sdol[<provider>]`. Import path: `sdol.extensions.<provider>.<paradigm>.<module>`.
 
 ---
 

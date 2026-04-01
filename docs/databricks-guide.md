@@ -10,7 +10,7 @@ SDOL ships with three Databricks-native typed connectors that let your agent que
 
 All three support **Unity Catalog** three-level namespacing and generate Databricks-native queries with platform-specific optimizations.
 
-These are **provider extensions** of the paradigm base classes and live in `extensions/databricks/` — separated from core `src/sdol/` to keep the core package clean. Import them via `sdol.extensions.databricks.*` or directly from `sdol` (re-exported for convenience).
+These are **provider extensions** of the paradigm base classes and live in `src/sdol/extensions/databricks/`. Install with `pip install sdol[databricks]`. Import them via `sdol.extensions.databricks.*` or directly from `sdol` (re-exported for convenience).
 
 ---
 

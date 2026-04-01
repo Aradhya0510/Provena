@@ -12,6 +12,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+databricks = [
+    "databricks-sdk>=0.20.0",
+    "databricks-vectorsearch>=0.40",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -19,12 +23,10 @@ dev = [
     "mypy>=1.10.0",
     "ruff>=0.5.0",
 ]
+all = ["sdol[databricks]"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sdol"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"extensions/databricks" = "sdol/extensions/databricks"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

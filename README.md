@@ -66,7 +66,7 @@ SDOL introduces a semantic layer that:
 Each layer is independent and composable:
 - **Intent layer** — Pydantic v2 models with discriminated unions, validated at construction time
 - **Router layer** — decomposes composites, plans execution topology, estimates cost, routes to connectors
-- **Connector layer** — three-tier model: foundation (`BaseConnector`), paradigm bases (`BaseOLAPConnector`, `BaseOLTPConnector`, `BaseDocumentConnector`), and provider extensions (in `extensions/`) with pluggable executors
+- **Connector layer** — three-tier model: foundation (`BaseConnector`), paradigm bases (`BaseOLAPConnector`, `BaseOLTPConnector`, `BaseDocumentConnector`), and provider extensions (in `src/sdol/extensions/`) with pluggable executors
 - **Context layer** — assembles typed slots, detects cross-source conflicts, resolves via heuristics
 - **Epistemic layer** — aggregates trust signals into an LLM-injectable prompt
 
@@ -121,16 +121,16 @@ asyncio.run(main())
 
 Connectors follow a three-tier architecture: **Foundation** (`BaseConnector`) → **Paradigm bases** (`BaseOLAPConnector`, `BaseOLTPConnector`, `BaseDocumentConnector`) → **Provider extensions**.
 
-Core paradigm bases and generic connectors live in `src/sdol/connectors/`. Provider-specific extensions (Databricks) live in `extensions/databricks/` — keeping the core clean and unchanged as new providers are added.
+Core paradigm bases and generic connectors live in `src/sdol/connectors/`. Provider-specific extensions live in `src/sdol/extensions/<provider>/` and are installed via optional dependencies (e.g., `pip install sdol[databricks]`).
 
 | Paradigm | Base Class | Provider | Class | Location | Intent Types |
 |----------|-----------|----------|-------|----------|-------------|
 | OLAP | `BaseOLAPConnector` | Generic (Snowflake, etc.) | `GenericOLAPConnector` | `src/sdol/connectors/olap/` | `aggregate_analysis`, `temporal_trend` |
-| OLAP | `BaseOLAPConnector` | Databricks SQL Warehouse | `DatabricksDBSQLConnector` | `extensions/databricks/olap/` | `aggregate_analysis`, `temporal_trend` |
+| OLAP | `BaseOLAPConnector` | Databricks SQL Warehouse | `DatabricksDBSQLConnector` | `src/sdol/extensions/databricks/olap/` | `aggregate_analysis`, `temporal_trend` |
 | OLTP | `BaseOLTPConnector` | Generic (PostgreSQL, etc.) | `GenericOLTPConnector` | `src/sdol/connectors/oltp/` | `point_lookup`, `aggregate_analysis` |
-| OLTP | `BaseOLTPConnector` | Databricks Lakebase | `DatabricksLakebaseConnector` | `extensions/databricks/oltp/` | `point_lookup`, `aggregate_analysis` |
+| OLTP | `BaseOLTPConnector` | Databricks Lakebase | `DatabricksLakebaseConnector` | `src/sdol/extensions/databricks/oltp/` | `point_lookup`, `aggregate_analysis` |
 | Document | `BaseDocumentConnector` | Generic (Pinecone, etc.) | `GenericDocumentConnector` | `src/sdol/connectors/document/` | `semantic_search` |
-| Document | `BaseDocumentConnector` | Databricks Vector Search | `DatabricksVectorSearchConnector` | `extensions/databricks/document/` | `semantic_search` |
+| Document | `BaseDocumentConnector` | Databricks Vector Search | `DatabricksVectorSearchConnector` | `src/sdol/extensions/databricks/document/` | `semantic_search` |
 
 All connectors use the `QueryExecutor` protocol — swap `MockQueryExecutor` for a real implementation to connect to production databases. To add a new provider, subclass the appropriate paradigm base and implement only `synthesize_query()` + `get_performance()`.
 
@@ -176,8 +176,7 @@ python examples/with_mcp_server.py      # MCP adapter integration
 
 ## Project Stats
 
-- 58 Python source files in `src/sdol/` (core only, no provider code)
-- 10 Python source files in `extensions/databricks/`
+- 68 Python source files in `src/sdol/` (core + provider extensions)
 - 23 test files, 254 tests passing
 - 3 example scripts
 - 5 benchmark scripts in `databricks_test/`
