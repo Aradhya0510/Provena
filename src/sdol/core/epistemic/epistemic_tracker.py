@@ -12,10 +12,15 @@ from sdol.types.provenance import TrustScore
 class EpistemicTracker:
     def __init__(self) -> None:
         self._frames: list[ContextFrame] = []
+        self._warnings: list[str] = []
 
     def ingest(self, frame: ContextFrame) -> None:
         """Ingest a new context frame."""
         self._frames.append(frame)
+
+    def add_warning(self, message: str) -> None:
+        """Add a warning to the epistemic context (e.g. trust threshold filtering)."""
+        self._warnings.append(message)
 
     def get_trust(self, element_id: str) -> TrustScore | None:
         """Get trust score for a specific element."""
@@ -93,7 +98,13 @@ class EpistemicTracker:
                     f"vs {c.value_b} ({c.element_b.provenance.source_system})"
                 )
 
+        if self._warnings:
+            lines.append(f"- Warnings:")
+            for w in self._warnings:
+                lines.append(f"  - {w}")
+
         return "\n".join(lines)
 
     def reset(self) -> None:
         self._frames.clear()
+        self._warnings.clear()

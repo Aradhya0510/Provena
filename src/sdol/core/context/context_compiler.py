@@ -19,6 +19,8 @@ from sdol.types.context import (
     ContextFrameStats,
     ContextSlot,
     ContextSlotType,
+    PresenceConflict,
+    TrustSummary,
 )
 from sdol.types.provenance import ProvenanceEnvelope
 
@@ -67,10 +69,17 @@ class ContextCompiler:
         self._elements.append((input.slot_type, element))
         return element
 
-    def compile(self) -> ContextFrame:
+    def compile(
+        self,
+        expected_sources: list[dict[str, str]] | None = None,
+    ) -> ContextFrame:
         """
         Compile all added elements into a ContextFrame.
         Groups into typed slots, detects conflicts, computes stats.
+
+        Args:
+            expected_sources: Optional list of dicts with 'source_system' and
+                'connector_id' for presence conflict detection.
         """
         slot_groups: dict[ContextSlotType, list[ContextElement]] = {}
         for slot_type, element in self._elements:
@@ -90,6 +99,13 @@ class ContextCompiler:
 
         resolved_conflicts = [self.conflict_resolver.resolve(c) for c in conflicts]
 
+        # Presence conflict detection
+        presence_conflicts: list[PresenceConflict] = []
+        if expected_sources and all_elements:
+            presence_conflicts = self.conflict_detector.detect_presence_conflicts(
+                all_elements, expected_sources
+            )
+
         trust_scores = [elem.trust.composite for _, elem in self._elements]
         avg_trust = sum(trust_scores) / len(trust_scores) if trust_scores else 0.0
 
@@ -99,11 +115,54 @@ class ContextCompiler:
             slot_counts={st.value: len(elems) for st, elems in slot_groups.items()},
         )
 
+        trust_summary = self._build_trust_summary(all_elements, avg_trust)
+
         return ContextFrame(
             slots=slots,
             conflicts=resolved_conflicts,
+            presence_conflicts=presence_conflicts,
             stats=stats,
             assembled_at=datetime.now(timezone.utc).isoformat(),
+            trust_summary=trust_summary,
+        )
+
+    def _build_trust_summary(
+        self,
+        elements: list[ContextElement],
+        avg_trust: float,
+    ) -> TrustSummary | None:
+        if not elements:
+            return None
+
+        if avg_trust >= 0.8:
+            confidence = "high"
+        elif avg_trust >= 0.55:
+            confidence = "medium"
+        elif avg_trust >= 0.3:
+            confidence = "low"
+        else:
+            confidence = "uncertain"
+
+        lowest = min(elements, key=lambda e: e.trust.composite)
+        lowest_source = (
+            f"{lowest.provenance.source_system} ({lowest.trust.composite:.3f})"
+        )
+
+        advisories = []
+        for elem in elements:
+            staleness = elem.provenance.staleness_window_sec
+            if staleness and staleness > 300:
+                mins = int(staleness / 60)
+                advisories.append(
+                    f"{elem.provenance.source_system} is ~{mins}min stale; "
+                    f"for real-time decisions, prefer sources with stronger consistency"
+                )
+                break
+
+        return TrustSummary(
+            overall_confidence=confidence,
+            lowest_trust_source=lowest_source,
+            advisory=advisories[0] if advisories else None,
         )
 
     def reset(self) -> None:

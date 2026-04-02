@@ -7,6 +7,7 @@ from sdol.types.context import (
     ContextConflict,
     ContextElement,
     ContextSlotType,
+    PresenceConflict,
 )
 
 COMPARABLE_SLOT_TYPES = {ContextSlotType.STRUCTURED, ContextSlotType.TEMPORAL}
@@ -43,6 +44,50 @@ class ConflictDetector:
                     conflicts.extend(field_conflicts)
 
         return conflicts
+
+    def detect_presence_conflicts(
+        self,
+        elements: list[ContextElement],
+        expected_sources: list[dict[str, str]],
+    ) -> list[PresenceConflict]:
+        """
+        Detect when expected sources returned no data.
+
+        Args:
+            elements: All elements from executed steps.
+            expected_sources: List of dicts with 'source_system' and 'connector_id'
+                for each source that was expected to return data.
+
+        Returns:
+            PresenceConflict for each expected source that returned no elements.
+        """
+        actual_sources = {elem.provenance.source_system for elem in elements}
+        presence_conflicts: list[PresenceConflict] = []
+
+        present_elements = elements  # use first available for reference
+        if not present_elements:
+            return presence_conflicts
+
+        for expected in expected_sources:
+            src = expected["source_system"]
+            if src not in actual_sources:
+                presence_conflicts.append(
+                    PresenceConflict(
+                        present_element=present_elements[0],
+                        missing_source_system=src,
+                        missing_connector_id=expected["connector_id"],
+                        resolution=ConflictResolution(
+                            strategy="prefer_present_source",
+                            winner=present_elements[0].id,
+                            reason=(
+                                f"Source '{src}' returned no data for this query. "
+                                f"The present source is the sole authority."
+                            ),
+                        ),
+                    )
+                )
+
+        return presence_conflicts
 
     def _compare_data(
         self,

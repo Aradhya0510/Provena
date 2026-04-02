@@ -28,6 +28,23 @@ SDOL introduces a semantic layer that:
 
 ---
 
+## Why SDOL — "The LLM Is Already Smart Enough"
+
+Modern LLMs like Claude Sonnet can write correct SQL, produce clean aggregations, and generate well-structured answers without SDOL. So why add a middleware layer?
+
+**Because correctness is not the same as auditability.**
+
+SDOL's value is not in making the agent *smarter* — it's in making the agent *auditable*:
+
+- **Provenance is structural, not hallucinatable.** When SDOL says data came from the OLTP registry with 30s staleness and strong consistency, that's a verified fact attached at retrieval time — not something the LLM inferred or guessed. No prompt engineering can produce this.
+- **Conflict detection is automatic.** When the OLTP registry says a machine is offline but the OLAP batch table says online, SDOL detects the disagreement *before* it reaches the LLM and resolves it using provenance heuristics. Without SDOL, the agent silently picks one or hallucinates a reconciliation.
+- **Trust scores are computed, not estimated.** Each data element carries a four-dimensional trust signal (authority, consistency, freshness, precision) computed from actual source metadata. The LLM can reason over concrete numbers instead of making qualitative guesses.
+- **Token efficiency is a side effect.** SDOL's push-down execution (aggregating inside the database, targeted vector search) means the agent's context window receives compact results instead of raw rows. This matters at scale — 360K telemetry rows vs. a single aggregated number.
+
+**In short:** SDOL makes your agent auditable, not just capable. The agent can explain *why* it trusts a piece of data, not just *what* the data says.
+
+---
+
 ## Architecture
 
 ```

@@ -27,14 +27,20 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 
-CATALOG = "sdol_benchmark"
-SCHEMA = "fleet"
+dbutils.widgets.text("catalog", "users")
+dbutils.widgets.text("schema", "default")
+dbutils.widgets.text("llm_endpoint", "databricks-claude-sonnet-4-6")
+dbutils.widgets.text("sdol_project_root", "/Workspace/Users/{user}/SDOL")
+dbutils.widgets.text("vs_endpoint", "sdol_fleet_vs")
 
-LLM_ENDPOINT = "databricks-claude-3-7-sonnet"
+CATALOG = dbutils.widgets.get("catalog")
+SCHEMA = dbutils.widgets.get("schema")
 
-SDOL_PROJECT_ROOT = "/Workspace/Users/{user}/SDOL-python"
+LLM_ENDPOINT = dbutils.widgets.get("llm_endpoint")
 
-VS_ENDPOINT_NAME = "sdol_fleet_vs"
+SDOL_PROJECT_ROOT = dbutils.widgets.get("sdol_project_root")
+
+VS_ENDPOINT_NAME = dbutils.widgets.get("vs_endpoint")
 VS_INDEX_NAME = f"{CATALOG}.{SCHEMA}.maintenance_logs_index"
 
 # COMMAND ----------
@@ -233,42 +239,79 @@ def _format_frame(frame):
             "resolution_winner": c.resolution.winner,
             "resolution_reason": c.resolution.reason,
         })
-    return json.dumps({
+    presence_conflicts = []
+    for pc in frame.presence_conflicts:
+        presence_conflicts.append({
+            "missing_source": pc.missing_source_system,
+            "missing_connector": pc.missing_connector_id,
+            "resolution": pc.resolution.reason,
+        })
+    output = {
         "results": results,
         "result_count": len(results),
         "conflicts": conflicts,
         "data_confidence": sdol.get_epistemic_context(),
-    }, indent=2, default=str)
+    }
+    if frame.trust_summary:
+        output["trust_summary"] = {
+            "overall_confidence": frame.trust_summary.overall_confidence,
+            "lowest_trust_source": frame.trust_summary.lowest_trust_source,
+            "advisory": frame.trust_summary.advisory,
+        }
+    if presence_conflicts:
+        output["presence_conflicts"] = presence_conflicts
+    return json.dumps(output, indent=2, default=str)
 
 # ─────────────── Baseline Tools ───────────────
+# Simulates a naive MCP data connector that exposes row-fetching tools
+# rather than arbitrary SQL. This forces the baseline to consume raw rows
+# into its context window — exposing the token-busting failure mode.
 
 @tool
-def execute_sql(query: str) -> str:
-    """Execute a SQL query against the Databricks lakehouse and return results as JSON.
+def get_table_sample(table: str, n_rows: int = 100, filter_expr: str = "") -> str:
+    """Fetch a sample of rows from a fleet table. Returns raw rows as JSON.
+
+    This is similar to how most MCP data connectors work — they expose
+    data-fetching tools that return rows, not arbitrary SQL execution.
+
     Args:
-        query: A complete, valid Spark SQL query.
+        table: Table name (one of: fleet_machines, telemetry_readings,
+               telemetry_daily, maintenance_logs).
+        n_rows: Number of rows to return (max 500).
+        filter_expr: Optional SQL WHERE clause (e.g. "machine_id = 'EXC-0342'").
     """
     try:
+        n_rows = min(n_rows, 500)
+        fq_table = f"{CATALOG}.{SCHEMA}.{table}"
+        where = f" WHERE {filter_expr}" if filter_expr.strip() else ""
+        query = f"SELECT * FROM {fq_table}{where} LIMIT {n_rows}"
         df = spark.sql(query)
-        records = [row.asDict() for row in df.limit(100).collect()]
+        records = [row.asDict() for row in df.collect()]
         return json.dumps(records, indent=2, default=str)
     except Exception as exc:
-        return f"SQL error: {exc}"
+        return f"Error: {exc}"
 
 @tool
-def describe_tables() -> str:
-    """List all fleet benchmark tables and their columns."""
-    info = {}
-    for tbl in ["fleet_machines", "telemetry_readings", "telemetry_daily", "maintenance_logs"]:
-        cols = [
-            row.col_name
-            for row in spark.sql(f"DESCRIBE {CATALOG}.{SCHEMA}.{tbl}").collect()
-            if not row.col_name.startswith("#")
-        ]
-        info[f"{CATALOG}.{SCHEMA}.{tbl}"] = cols
-    return json.dumps(info, indent=2)
+def search_logs_text(keyword: str, n_rows: int = 50) -> str:
+    """Search maintenance logs by keyword match (LIKE). Returns raw rows.
+    Args:
+        keyword: Text to search for in the description field.
+        n_rows: Number of rows to return (max 200).
+    """
+    try:
+        n_rows = min(n_rows, 200)
+        query = f"""
+            SELECT * FROM {CATALOG}.{SCHEMA}.maintenance_logs
+            WHERE lower(description) LIKE lower('%{keyword}%')
+            LIMIT {n_rows}
+        """
+        df = spark.sql(query)
+        records = [row.asDict() for row in df.collect()]
+        return json.dumps(records, indent=2, default=str)
+    except Exception as exc:
+        return f"Error: {exc}"
 
-baseline_tools = [execute_sql, describe_tables]
+baseline_tools = [get_table_sample, search_logs_text]
 
 # ─────────────── SDOL Tools ───────────────
 
@@ -530,8 +573,8 @@ You have access to a Databricks lakehouse with the following tables:
 
 {TABLE_SCHEMAS}
 
-Use `describe_tables` to inspect columns if unsure.
-Use `execute_sql` to run Spark SQL queries. Always use fully-qualified names ({FQ}.<table>).
+Use `get_table_sample` to fetch rows from tables. You can filter with a WHERE clause.
+Use `search_logs_text` to search maintenance logs by keyword.
 Present results clearly with actual values.
 """
 
@@ -579,17 +622,31 @@ print("Both agents compiled")
 
 # COMMAND ----------
 
-def invoke_agent(agent, question: str) -> str:
+def invoke_agent(agent, question: str) -> tuple[str, int]:
+    """Invoke an agent and return (response, context_tokens_consumed).
+
+    context_tokens_consumed is the total character count of all tool call
+    results flowing through the agent's context window — a proxy for
+    intermediate token consumption.
+    """
     result = agent.invoke({"messages": [HumanMessage(content=question)]})
+    tool_result_chars = 0
+    for msg in result["messages"]:
+        # ToolMessage results represent data consumed by the agent
+        if hasattr(msg, "content") and getattr(msg, "type", None) == "tool":
+            tool_result_chars += len(str(msg.content))
     last = result["messages"][-1]
-    return last.content if hasattr(last, "content") else str(last)
+    response = last.content if hasattr(last, "content") else str(last)
+    return response, tool_result_chars
 
 q = "What is Machine EXC-0001's model and firmware version?"
 print("── Baseline ──")
-print(invoke_agent(baseline_agent, q)[:500])
+resp, tokens = invoke_agent(baseline_agent, q)
+print(f"{resp[:500]}  [context_chars={tokens}]")
 print("\n── SDOL ──")
 sdol.reset()
-print(invoke_agent(sdol_agent, q)[:500])
+resp, tokens = invoke_agent(sdol_agent, q)
+print(f"{resp[:500]}  [context_chars={tokens}]")
 
 # COMMAND ----------
 
@@ -658,6 +715,19 @@ EVAL_QUESTIONS = [
             "Baseline will likely not mention data quality concerns."
         ),
     },
+    # ── SHOWCASE Q3: Trust Metadata — baseline structurally cannot answer ──
+    {
+        "question": (
+            "Which data sources should I trust most for real-time fleet decisions, "
+            "and which have known staleness risks? Give me concrete numbers."
+        ),
+        "category": "trust_meta",
+        "expected_response": (
+            "SDOL should answer from its trust scorer config and epistemic tracker "
+            "with concrete trust scores, consistency levels, and staleness windows. "
+            "The baseline has no provenance metadata and can only speculate."
+        ),
+    },
 ]
 
 print(f"Evaluation set: {len(EVAL_QUESTIONS)} questions")
@@ -682,32 +752,34 @@ for i, eq in enumerate(EVAL_QUESTIONS):
     sdol.reset()
     t0 = time.time()
     try:
-        b_resp = invoke_agent(baseline_agent, q)
+        b_resp, b_tokens = invoke_agent(baseline_agent, q)
     except Exception as exc:
-        b_resp = f"ERROR: {exc}"
+        b_resp, b_tokens = f"ERROR: {exc}", 0
     b_lat = round(time.time() - t0, 2)
 
     sdol.reset()
     t0 = time.time()
     try:
-        s_resp = invoke_agent(sdol_agent, q)
+        s_resp, s_tokens = invoke_agent(sdol_agent, q)
     except Exception as exc:
-        s_resp = f"ERROR: {exc}"
+        s_resp, s_tokens = f"ERROR: {exc}", 0
     s_lat = round(time.time() - t0, 2)
 
     rows.append({
         "question": q, "category": cat, "expected_response": eq["expected_response"],
         "baseline_response": b_resp, "baseline_latency_sec": b_lat,
+        "baseline_context_chars": b_tokens,
         "sdol_response": s_resp, "sdol_latency_sec": s_lat,
+        "sdol_context_chars": s_tokens,
     })
-    print(f"   baseline={b_lat}s  sdol={s_lat}s")
+    print(f"   baseline={b_lat}s/{b_tokens}chars  sdol={s_lat}s/{s_tokens}chars")
 
 results_df = pd.DataFrame(rows)
 print(f"\nAll {len(results_df)} questions answered.")
 
 # COMMAND ----------
 
-display(spark.createDataFrame(results_df[["question", "category", "baseline_latency_sec", "sdol_latency_sec"]]))
+display(spark.createDataFrame(results_df[["question", "category", "baseline_latency_sec", "sdol_latency_sec", "baseline_context_chars", "sdol_context_chars"]]))
 
 # COMMAND ----------
 
@@ -766,6 +838,14 @@ baseline_eval_data = [
 ]
 
 with mlflow.start_run(run_name="fleet_baseline_mcp"):
+    # Log latency and token-efficiency metrics per question
+    for _, row in results_df.iterrows():
+        mlflow.log_metric(f"latency_{row['category']}", row["baseline_latency_sec"])
+        mlflow.log_metric(f"context_chars_{row['category']}", row["baseline_context_chars"])
+    mlflow.log_metric("latency_mean", results_df["baseline_latency_sec"].mean())
+    mlflow.log_metric("context_chars_mean", results_df["baseline_context_chars"].mean())
+    mlflow.log_metric("context_chars_total", results_df["baseline_context_chars"].sum())
+
     baseline_eval = mlflow.genai.evaluate(
         data=baseline_eval_data,
         predict_fn=lambda question: results_df.loc[
@@ -788,6 +868,14 @@ sdol_eval_data = [
 ]
 
 with mlflow.start_run(run_name="fleet_sdol_enhanced"):
+    # Log latency and token-efficiency metrics per question
+    for _, row in results_df.iterrows():
+        mlflow.log_metric(f"latency_{row['category']}", row["sdol_latency_sec"])
+        mlflow.log_metric(f"context_chars_{row['category']}", row["sdol_context_chars"])
+    mlflow.log_metric("latency_mean", results_df["sdol_latency_sec"].mean())
+    mlflow.log_metric("context_chars_mean", results_df["sdol_context_chars"].mean())
+    mlflow.log_metric("context_chars_total", results_df["sdol_context_chars"].sum())
+
     sdol_eval = mlflow.genai.evaluate(
         data=sdol_eval_data,
         predict_fn=lambda question: results_df.loc[
@@ -826,8 +914,10 @@ display(spark.createDataFrame(comparison_df))
 
 latency_summary = pd.DataFrame({
     "Agent": ["Baseline", "SDOL-Enhanced"],
-    "Mean (s)": [results_df["baseline_latency_sec"].mean(), results_df["sdol_latency_sec"].mean()],
-    "Median (s)": [results_df["baseline_latency_sec"].median(), results_df["sdol_latency_sec"].median()],
+    "Mean Latency (s)": [results_df["baseline_latency_sec"].mean(), results_df["sdol_latency_sec"].mean()],
+    "Median Latency (s)": [results_df["baseline_latency_sec"].median(), results_df["sdol_latency_sec"].median()],
+    "Mean Context Chars": [results_df["baseline_context_chars"].mean(), results_df["sdol_context_chars"].mean()],
+    "Total Context Chars": [results_df["baseline_context_chars"].sum(), results_df["sdol_context_chars"].sum()],
 })
 display(spark.createDataFrame(latency_summary))
 
@@ -878,10 +968,12 @@ for _, row in results_df.iterrows():
 # MAGIC
 # MAGIC | Scenario | Vanilla MCP | SDOL-Enhanced |
 # MAGIC |----------|-------------|---------------|
-# MAGIC | **Q1: Cross-paradigm** | Scans raw telemetry rows, generic text search | Push-down AVG inside Databricks, targeted vector search by machine IDs |
-# MAGIC | **Q2: Epistemic conflict** | Gets contradictory answers, picks one silently | Detects conflict, resolves via `prefer_strongest_consistency`, explains transparently |
+# MAGIC | **Q1: Cross-paradigm** | Fetches raw rows via `get_table_sample`, keyword search | Push-down AVG inside Databricks, targeted vector search by machine IDs |
+# MAGIC | **Q2: Epistemic conflict** | Gets contradictory data, picks one silently | Detects conflict, resolves via `prefer_strongest_consistency`, explains transparently |
+# MAGIC | **Q3: Trust metadata** | No provenance — can only speculate about source reliability | Answers from trust scorer config with concrete scores and staleness windows |
 # MAGIC | **Provenance** | None — all data treated as equally reliable | Every element tagged with source, freshness, consistency, trust score |
-# MAGIC | **Token efficiency** | Dumps raw rows into context window | Returns tiny aggregated results + provenance metadata |
+# MAGIC | **Token efficiency** | Dumps raw rows into context window (check `context_chars` metric) | Returns tiny aggregated results + provenance metadata |
+# MAGIC | **Latency** | Single tool call per question | Multiple typed calls — tradeoff visible in `latency_*` MLflow metrics |
 # MAGIC
 # MAGIC Check the MLflow Experiment UI for full traces, judge rationales, and per-question drilldowns.
 

@@ -39,7 +39,7 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 CATALOG = "users"   # Must match 00_setup notebook
-SCHEMA = "aradhya_chouhan"
+SCHEMA = "default"  # Must match 00_setup notebook
 
 LLM_ENDPOINT = "databricks-claude-3-7-sonnet"  # TODO: any Foundation Model endpoint
 

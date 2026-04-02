@@ -22,18 +22,32 @@
 
 # COMMAND ----------
 
+# MAGIC %pip install -U -qqqq databricks-vectorsearch
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Configuration
 
 # COMMAND ----------
 
-CATALOG = "sdol_benchmark"
-SCHEMA = "fleet"
-USE_EXISTING_CATALOG = True
+dbutils.widgets.text("catalog", "users")
+dbutils.widgets.text("schema", "default")
+dbutils.widgets.text("vs_endpoint", "sdol_fleet_vs")
+dbutils.widgets.text("embedding_model", "databricks-bge-large-en")
+dbutils.widgets.dropdown("use_existing_catalog", "true", ["true", "false"])
 
-VS_ENDPOINT_NAME = "sdol_fleet_vs"
+CATALOG = dbutils.widgets.get("catalog")
+SCHEMA = dbutils.widgets.get("schema")
+USE_EXISTING_CATALOG = dbutils.widgets.get("use_existing_catalog") == "true"
+
+VS_ENDPOINT_NAME = dbutils.widgets.get("vs_endpoint")
 VS_INDEX_NAME = f"{CATALOG}.{SCHEMA}.maintenance_logs_index"
-EMBEDDING_MODEL = "databricks-bge-large-en"
+EMBEDDING_MODEL = dbutils.widgets.get("embedding_model")
 
 # COMMAND ----------
 
@@ -213,8 +227,26 @@ telemetry_daily_df = (
 )
 
 telemetry_daily_df.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{CATALOG}.{SCHEMA}.telemetry_daily")
+
+# --- Conflict seed: insert a synthetic "today" row for EXC-0342 ---
+# The OLAP daily table will show 'online' for today, while OLTP says 'offline'.
+# Without this row, the OLAP query for today returns zero rows and no conflict fires.
+from pyspark.sql import Row
+conflict_row = spark.createDataFrame([Row(
+    machine_id="EXC-0342",
+    report_date=spark.sql("SELECT current_date()").first()[0],
+    avg_engine_temp=105.3,
+    max_engine_temp=125.0,
+    avg_rpm=2100,
+    avg_fuel_efficiency=16.2,
+    min_fuel_efficiency=14.8,
+    reading_count=4,
+    last_known_status="online",  # contradicts OLTP 'offline'
+)])
+conflict_row.write.mode("append").saveAsTable(f"{CATALOG}.{SCHEMA}.telemetry_daily")
+
 cnt = spark.table(f"{CATALOG}.{SCHEMA}.telemetry_daily").count()
-print(f"telemetry_daily: {cnt} rows")
+print(f"telemetry_daily: {cnt} rows (includes conflict seed for today)")
 
 # COMMAND ----------
 

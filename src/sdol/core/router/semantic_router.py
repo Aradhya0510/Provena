@@ -53,7 +53,17 @@ class SemanticRouter:
                     )
                 )
 
-        return self.compiler.compile()
+        # Build expected sources list for presence conflict detection
+        expected_sources = []
+        for step in plan.steps:
+            connector = self.registry.get_connector(step.connector_id)
+            if connector is not None:
+                expected_sources.append({
+                    "source_system": connector.source_system,
+                    "connector_id": step.connector_id,
+                })
+
+        return self.compiler.compile(expected_sources=expected_sources)
 
     async def _execute_plan(self, plan: ExecutionPlan) -> ExecutionResult:
         """

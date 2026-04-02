@@ -42,6 +42,7 @@ class ConflictResolution(BaseModel):
         "prefer_freshest",
         "prefer_authoritative",
         "prefer_strongest_consistency",
+        "prefer_present_source",
         "defer_to_agent",
     ]
     winner: str | None = None
@@ -57,10 +58,27 @@ class ContextConflict(BaseModel):
     resolution: ConflictResolution
 
 
+class PresenceConflict(BaseModel):
+    """Flagged when a composite query expects data from N sources but fewer respond."""
+
+    present_element: ContextElement
+    missing_source_system: str
+    missing_connector_id: str
+    resolution: ConflictResolution
+
+
 class ContextFrameStats(BaseModel):
     total_elements: int
     avg_trust_score: float
     slot_counts: dict[str, int]
+
+
+class TrustSummary(BaseModel):
+    """Pre-digested trust signal for LLM consumption."""
+
+    overall_confidence: str
+    lowest_trust_source: str | None = None
+    advisory: str | None = None
 
 
 class ContextFrame(BaseModel):
@@ -68,5 +86,7 @@ class ContextFrame(BaseModel):
 
     slots: list[ContextSlot]
     conflicts: list[ContextConflict]
+    presence_conflicts: list[PresenceConflict] = []
     stats: ContextFrameStats
     assembled_at: str
+    trust_summary: TrustSummary | None = None

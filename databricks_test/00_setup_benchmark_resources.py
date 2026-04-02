@@ -24,7 +24,7 @@
 # COMMAND ----------
 
 CATALOG = "users"  # TODO: change if needed
-SCHEMA = "aradhya_chouhan"
+SCHEMA = "default"  # Change to your schema
 USE_EXISTING_CATALOG = False
 
 # COMMAND ----------
