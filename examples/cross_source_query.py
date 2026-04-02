@@ -7,7 +7,7 @@ Spans OLAP (churn scores), OLTP (tickets), time-series (usage).
 
 import asyncio
 
-from sdol import (
+from provena import (
     SDOL,
     CapabilityRegistry,
     ContextCompiler,
@@ -16,11 +16,11 @@ from sdol import (
     SemanticRouter,
     TrustScorer,
 )
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.core.provenance.trust_scorer import TrustScorerConfig
-from sdol.core.router.cost_estimator import CostEstimator
-from sdol.core.router.intent_decomposer import IntentDecomposer
-from sdol.core.router.query_planner import QueryPlanner
+from provena.connectors.executor import MockQueryExecutor
+from provena.core.provenance.trust_scorer import TrustScorerConfig
+from provena.core.router.cost_estimator import CostEstimator
+from provena.core.router.intent_decomposer import IntentDecomposer
+from provena.core.router.query_planner import QueryPlanner
 
 
 async def main() -> None:
@@ -46,21 +46,21 @@ async def main() -> None:
 
     sdol = SDOL(router)
 
-    intent = sdol.formulator.composite(
+    intent = provena.formulator.composite(
         sub_intents=[
-            sdol.formulator.aggregate_analysis(
+            provena.formulator.aggregate_analysis(
                 entity="customer_churn_scores",
                 measures=[{"field": "churn_probability", "aggregation": "max"}],
                 dimensions=["customer_id", "region"],
                 having=[{"field": "churn_probability", "operator": "gt", "value": 0.7}],
             ),
-            sdol.formulator.point_lookup("support_tickets", {"status": "unresolved"}),
+            provena.formulator.point_lookup("support_tickets", {"status": "unresolved"}),
         ],
         fusion_operator="intersect",
         fusion_key="customer_id",
     )
 
-    frame = await sdol.query(intent)
+    frame = await provena.query(intent)
 
     print("=== Context Frame Stats ===")
     print(f"  Elements: {frame.stats.total_elements}")
@@ -69,7 +69,7 @@ async def main() -> None:
     print(f"  Conflicts: {len(frame.conflicts)}")
     print()
     print("=== Epistemic Context ===")
-    print(sdol.get_epistemic_context())
+    print(provena.get_epistemic_context())
 
 
 if __name__ == "__main__":

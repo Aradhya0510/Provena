@@ -2,8 +2,8 @@
 
 from datetime import datetime, timezone
 
-from sdol.core.epistemic.epistemic_tracker import EpistemicTracker
-from sdol.types.context import (
+from provena.core.epistemic.epistemic_tracker import EpistemicTracker
+from provena.types.context import (
     ConflictResolution,
     ContextConflict,
     ContextElement,
@@ -12,7 +12,7 @@ from sdol.types.context import (
     ContextSlot,
     ContextSlotType,
 )
-from sdol.types.provenance import (
+from provena.types.provenance import (
     ConsistencyGuarantee,
     PrecisionClass,
     ProvenanceEnvelope,

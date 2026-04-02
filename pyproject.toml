@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "sdol"
-version = "0.1.0"
-description = "Semantic Data Orchestration Layer — storage-aware agent middleware"
+name = "provena"
+version = "0.2.0"
+description = "Provena — Epistemic provenance for AI agents"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7.0",
@@ -23,10 +23,10 @@ dev = [
     "mypy>=1.10.0",
     "ruff>=0.5.0",
 ]
-all = ["sdol[databricks]"]
+all = ["provena[databricks]"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/sdol"]
+packages = ["src/provena"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

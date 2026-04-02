@@ -2,13 +2,13 @@
 
 import pytest
 
-from sdol.connectors.document.base import BaseDocumentConnector
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.types.capability import ConnectorPerformance
-from sdol.types.context import ContextSlotType
-from sdol.types.errors import InvalidIntentError
-from sdol.types.intent import PointLookupIntent, SemanticSearchIntent
-from sdol.types.provenance import ConsistencyGuarantee
+from provena.connectors.document.base import BaseDocumentConnector
+from provena.connectors.executor import MockQueryExecutor
+from provena.types.capability import ConnectorPerformance
+from provena.types.context import ContextSlotType
+from provena.types.errors import InvalidIntentError
+from provena.types.intent import PointLookupIntent, SemanticSearchIntent
+from provena.types.provenance import ConsistencyGuarantee
 
 
 class StubDocumentConnector(BaseDocumentConnector):

@@ -1,7 +1,7 @@
 """Tests for IntentDecomposer."""
 
-from sdol.core.router.intent_decomposer import IntentDecomposer
-from sdol.types.intent import (
+from provena.core.router.intent_decomposer import IntentDecomposer
+from provena.types.intent import (
     CompositeIntent,
     FusionOperator,
     PointLookupIntent,

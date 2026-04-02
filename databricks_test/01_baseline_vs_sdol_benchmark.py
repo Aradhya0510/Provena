@@ -1,31 +1,31 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # SDOL Benchmark: Baseline MCP Agent vs SDOL-Enhanced Agent
+# MAGIC # Provena in Action: Seeing the Concepts Work with Real Data
 # MAGIC
-# MAGIC This notebook runs a **head-to-head evaluation** of two LangGraph agents that query the same
-# MAGIC Databricks lakehouse data:
+# MAGIC This notebook is an **interactive walkthrough** of every core Provena concept,
+# MAGIC executed against real Databricks tables created by notebook `02_fleet_setup`.
 # MAGIC
-# MAGIC | Agent | Tools | System Prompt | Key Capability |
-# MAGIC |-------|-------|---------------|----------------|
-# MAGIC | **Baseline** | Raw `execute_sql` | Generic data analyst | LLM writes SQL directly |
-# MAGIC | **SDOL-Enhanced** | Typed SDOL tools | Epistemic-aware analyst | SDOL generates optimized SQL, tracks provenance & trust |
+# MAGIC Unlike the purely educational `00` notebook, this one uses real connectors
+# MAGIC (Lakebase, DBSQL, Vector Search) against real data. Each section isolates
+# MAGIC one concept so you can run the cells independently and inspect the output.
 # MAGIC
-# MAGIC Both agents use the same LLM endpoint and answer the same evaluation questions.
-# MAGIC **Databricks-managed LLM judges** (via MLflow) score every response on relevance, safety,
-# MAGIC data-confidence awareness, and completeness.
+# MAGIC | Section | Concept | What You Will See |
+# MAGIC |---------|---------|-------------------|
+# MAGIC | 0 | Setup | Wire the Provena pipeline with three Databricks connectors |
+# MAGIC | 1 | Typed Intents | Declare what you need, not how to get it |
+# MAGIC | 2 | Connector Pipeline | The 4-stage journey from intent to result |
+# MAGIC | 3 | Trust Scoring | Computed confidence across three source types |
+# MAGIC | 4 | Conflict Detection | When OLTP and OLAP disagree about the same machine |
+# MAGIC | 5 | Epistemic Context | The data-quality briefing injected into the LLM |
+# MAGIC | 6 | Semantic Search | Vector Search results with provenance metadata |
+# MAGIC | 7 | Full Picture | Determinism wrapping probabilism — cost summary |
 # MAGIC
-# MAGIC ### What SDOL adds
-# MAGIC 1. **Intent-based routing** — OLAP vs OLTP queries go to the right backend automatically
-# MAGIC 2. **Optimized SQL generation** — parameterized queries, Photon hints, column pruning
-# MAGIC 3. **Provenance tracking** — every result carries source, freshness, consistency metadata
-# MAGIC 4. **Trust scoring** — quantified confidence (0–1) per data element
-# MAGIC 5. **Epistemic context** — the agent can reason about and communicate data quality
-# MAGIC
-# MAGIC **Prerequisite:** Run `00_setup_benchmark_resources` first to create the data tables.
+# MAGIC **Prerequisite:** Run `02_fleet_setup` first to create the fleet tables and
+# MAGIC Vector Search index.
 
 # COMMAND ----------
 
-# MAGIC %pip install -U -qqqq databricks-langchain databricks-agents langgraph langchain langchain-core nest_asyncio
+# MAGIC %pip install -U -qqqq databricks-vectorsearch nest_asyncio
 
 # COMMAND ----------
 
@@ -34,82 +34,79 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Configuration
+# MAGIC ---
+# MAGIC ## Section 0: Setup and Configuration
 
 # COMMAND ----------
 
-CATALOG = "users"   # Must match 00_setup notebook
-SCHEMA = "default"  # Must match 00_setup notebook
+dbutils.widgets.text("catalog", "users")
+dbutils.widgets.text("schema", "aradhya_chouhan")
+dbutils.widgets.text("vs_endpoint", "sdol_fleet_vs")
+dbutils.widgets.text("sdol_project_root", "/Workspace/Users/{user}/SDOL")
 
-LLM_ENDPOINT = "databricks-claude-3-7-sonnet"  # TODO: any Foundation Model endpoint
+CATALOG = dbutils.widgets.get("catalog")
+SCHEMA = dbutils.widgets.get("schema")
+VS_ENDPOINT_NAME = dbutils.widgets.get("vs_endpoint")
+VS_INDEX_NAME = f"{CATALOG}.{SCHEMA}.maintenance_logs_index"
+SDOL_PROJECT_ROOT = dbutils.widgets.get("sdol_project_root")
 
-# Path to the SDOL project root — update for your workspace.
-# Option A: Workspace Repo / Git folder (add both src/ and project root for extensions)
-# Option B: Uploaded wheel  →  comment out sys.path and %pip install the wheel instead
-SDOL_PROJECT_ROOT = "/Workspace/Users/{user}/SDOL-python"  # TODO: update
+print(f"Catalog:     {CATALOG}")
+print(f"Schema:      {SCHEMA}")
+print(f"VS Endpoint: {VS_ENDPOINT_NAME}")
+print(f"VS Index:    {VS_INDEX_NAME}")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Install / import SDOL
+# MAGIC ### Import Provena from workspace path
 
 # COMMAND ----------
 
 import sys, os
 
-# Try importing; fall back to sys.path injection from the configured project root
 try:
-    import sdol  # already installed (wheel / pip)
+    import provena
 except ImportError:
     resolved = SDOL_PROJECT_ROOT.replace("{user}", spark.sql("SELECT current_user()").first()[0])
     src_path = os.path.join(resolved, "src")
     if os.path.isdir(src_path):
         sys.path.insert(0, src_path)
-        import sdol
-        print(f"Loaded SDOL from {src_path}")
+        import provena
+        print(f"Loaded Provena from {src_path}")
     else:
-        raise ImportError(
-            f"SDOL not found. Either install the wheel or update SDOL_PROJECT_ROOT "
-            f"(tried {resolved})"
-        )
+        raise ImportError(f"Provena not found at {resolved}")
 
-print(f"SDOL package loaded — exports: {sdol.__all__[:5]} …")
+print(f"Provena loaded — exports: {sdol.__all__[:5]}...")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Initialize the SDOL pipeline
-# MAGIC
-# MAGIC Wire up a `SparkSQLExecutor` (implements SDOL's `QueryExecutor` protocol using the
-# MAGIC notebook's Spark session), then register Databricks DBSQL and Lakebase connectors
-# MAGIC with the full SDOL stack: registry → planner → router → SDK.
+# MAGIC ### Wire up executors, connectors, and the full Provena pipeline
 
 # COMMAND ----------
 
-import asyncio, json, time, textwrap, nest_asyncio
+import asyncio, json, time, nest_asyncio
 nest_asyncio.apply()
 
-from sdol import (
-    SDOL as SDOLEngine,
+from provena import (
+    Provena as ProvenaEngine,
     CapabilityRegistry,
     ContextCompiler,
     DatabricksDBSQLConnector,
     DatabricksLakebaseConnector,
+    DatabricksVectorSearchConnector,
     SemanticRouter,
     TrustScorer,
 )
-from sdol.core.provenance.trust_scorer import TrustScorerConfig
-from sdol.core.router.cost_estimator import CostEstimator
-from sdol.core.router.intent_decomposer import IntentDecomposer
-from sdol.core.router.query_planner import QueryPlanner
+from provena.core.provenance.trust_scorer import TrustScorerConfig
+from provena.core.router.cost_estimator import CostEstimator
+from provena.core.router.intent_decomposer import IntentDecomposer
+from provena.core.router.query_planner import QueryPlanner
+from provena.types.provenance import ConsistencyGuarantee
 
 
 class SparkSQLExecutor:
-    """Bridges SDOL's QueryExecutor protocol with the notebook's SparkSession.
-
-    Errors are **propagated** rather than swallowed so that SDOL tools can
-    report the real failure to the LLM instead of returning empty results.
-    """
+    """Bridges SDOL's QueryExecutor protocol with the notebook's SparkSession."""
 
     async def execute(self, query) -> dict:
         sql_str = query.sql
@@ -121,776 +118,724 @@ class SparkSQLExecutor:
                 sql_str = sql_str.replace(placeholder, str(v))
         df = spark.sql(sql_str)
         records = [row.asDict() for row in df.limit(500).collect()]
-        return {
-            "records": records,
-            "meta": {"native_query": sql_str, "total_available": len(records)},
+        return {"records": records, "meta": {"native_query": sql_str, "total_available": len(records)}}
+
+
+class DatabricksVectorSearchExecutor:
+    """Bridges SDOL's QueryExecutor protocol with Databricks Vector Search."""
+
+    def __init__(self, endpoint_name, index_name):
+        from databricks.vector_search.client import VectorSearchClient
+        self._index = VectorSearchClient().get_index(
+            endpoint_name=endpoint_name, index_name=index_name,
+        )
+
+    async def execute(self, query) -> dict:
+        kwargs = {
+            "query_text": query.query_text,
+            "columns": query.columns or [
+                "log_id", "machine_id", "log_date",
+                "fault_category", "severity", "description",
+            ],
+            "num_results": query.num_results,
         }
+        if query.filters_json:
+            kwargs["filters"] = query.filters_json
+        results = self._index.similarity_search(**kwargs)
+        columns = [c["name"] for c in results.get("manifest", {}).get("columns", [])]
+        data_array = results.get("result", {}).get("data_array", [])
+        records = [dict(zip(columns, row)) for row in data_array]
+        return {"records": records, "meta": {"native_query": query.query_text, "total_available": len(records)}}
 
 
-executor = SparkSQLExecutor()
+# --- Instantiate executors ---
+sql_executor = SparkSQLExecutor()
+vs_executor = DatabricksVectorSearchExecutor(VS_ENDPOINT_NAME, VS_INDEX_NAME)
 
-dbsql_connector = DatabricksDBSQLConnector(
-    executor=executor,
-    connector_id="databricks.analytics",
-    source_system="databricks.sql_warehouse",
-    available_entities=["sales_transactions", "revenue_daily"],
+ENTITY_KEYS = ("machine_id",)
+
+# --- Register connectors ---
+oltp_connector = DatabricksLakebaseConnector(
+    executor=sql_executor,
+    connector_id="fleet.oltp",
+    source_system="databricks.lakebase.fleet",
+    available_entities=["fleet_machines"],
+    catalog=CATALOG,
+    schema=SCHEMA,
+    entity_key_fields=ENTITY_KEYS,
+)
+
+olap_connector = DatabricksDBSQLConnector(
+    executor=sql_executor,
+    connector_id="fleet.olap",
+    source_system="databricks.sql_warehouse.telemetry",
+    available_entities=["telemetry_readings", "telemetry_daily"],
     catalog=CATALOG,
     schema=SCHEMA,
     time_column_map={
-        "sales_transactions": "order_date",
-        "revenue_daily": "report_date",
+        "telemetry_readings": "reading_time",
+        "telemetry_daily": "report_date",
     },
+    entity_key_fields=ENTITY_KEYS,
+    consistency=ConsistencyGuarantee.EVENTUAL,
+    staleness_sec=900.0,
 )
 
-lakebase_connector = DatabricksLakebaseConnector(
-    executor=executor,
-    connector_id="databricks.serving",
-    source_system="databricks.lakebase",
-    available_entities=["customers", "products", "orders"],
+doc_connector = DatabricksVectorSearchConnector(
+    executor=vs_executor,
+    connector_id="fleet.docs",
+    source_system="databricks.vector_search.maintenance",
+    available_entities=["maintenance_logs"],
     catalog=CATALOG,
     schema=SCHEMA,
+    index_name=VS_INDEX_NAME,
 )
 
+# --- Build the Provena pipeline ---
 registry = CapabilityRegistry()
-registry.register(dbsql_connector)
-registry.register(lakebase_connector)
+registry.register(oltp_connector)
+registry.register(olap_connector)
+registry.register(doc_connector)
 
 trust_cfg = TrustScorerConfig(source_authority_map={
-    "databricks.sql_warehouse": 0.95,
-    "databricks.lakebase": 0.90,
+    "databricks.lakebase.fleet": 0.95,
+    "databricks.sql_warehouse.telemetry": 0.85,
+    "databricks.vector_search.maintenance": 0.70,
 })
 compiler = ContextCompiler(TrustScorer(trust_cfg))
 planner = QueryPlanner(registry, IntentDecomposer(), CostEstimator())
 router = SemanticRouter(planner, compiler, registry)
-sdol = SDOLEngine(router)
+sdol = ProvenaEngine(router)
 
-print("SDOL pipeline ready")
-print(f"  OLAP entities : {dbsql_connector._available_entities}")
-print(f"  OLTP entities : {lakebase_connector._available_entities}")
+print("SDOL fleet pipeline ready")
+print(f"  OLTP  entities: {oltp_connector._available_entities}")
+print(f"  OLAP  entities: {olap_connector._available_entities} (consistency={olap_connector.default_consistency.value})")
+print(f"  Doc   entities: {doc_connector._available_entities} (index={VS_INDEX_NAME})")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Define Agent Tools
-# MAGIC
-# MAGIC ### Baseline tools
-# MAGIC The baseline agent gets raw SQL execution — it must write all SQL itself.
-# MAGIC
-# MAGIC ### SDOL tools
-# MAGIC The SDOL agent gets intent-level tools that delegate SQL generation, execution,
-# MAGIC and provenance tracking to the SDOL pipeline.
+# MAGIC ### Helper: pretty-print a ContextFrame
 
 # COMMAND ----------
 
-from langchain_core.tools import tool
-
-def _parse_filters(raw: str) -> list[dict] | None:
-    """Parse a flexible filter string into SDOL FilterClause dicts.
-
-    Accepted formats (semicolon-separated):
-      • field = value          (equality shorthand)
-      • field:op:value         (explicit operator)
-      • field op value         (space-separated, op in {=, !=, >, <, >=, <=})
-
-    Returns None when *raw* is empty.
-    """
-    if not raw or not raw.strip():
-        return None
-    OP_ALIAS = {"=": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}
-    result = []
-    for part in raw.split(";"):
-        part = part.strip()
-        if not part:
-            continue
-        # field:op:value
-        if part.count(":") >= 2:
-            segs = part.split(":", 2)
-            field, op, val = segs[0].strip(), segs[1].strip(), segs[2].strip()
-        # field = value / field != value …
-        else:
-            matched = False
-            for sym in ("!=", ">=", "<=", ">", "<", "="):
-                if sym in part:
-                    field, val = [s.strip() for s in part.split(sym, 1)]
-                    op = OP_ALIAS.get(sym, "eq")
-                    matched = True
-                    break
-            if not matched:
-                continue
-        val = val.strip("'\"")
-        try:
-            val = float(val)
-        except ValueError:
-            pass
-        result.append({"field": field, "operator": op, "value": val})
-    return result or None
-
-def _format_frame(frame, include_confidence=True) -> str:
-    """Extract results + optional epistemic context from a ContextFrame."""
-    results = []
+def inspect_frame(frame, title=""):
+    """Pretty-print a ContextFrame showing data, provenance, and trust."""
+    if title:
+        print(f"\n{'='*80}")
+        print(f"  {title}")
+        print(f"{'='*80}")
     for slot in frame.slots:
-        for elem in slot.elements:
-            results.append({
-                "data": elem.data,
-                "source": elem.provenance.source_system,
-                "freshness_sec": elem.provenance.staleness_window_sec,
-                "consistency": elem.provenance.consistency.value,
-                "precision": elem.provenance.precision.value,
-                "trust_score": round(elem.trust.composite, 3),
-            })
-    out = {"results": results, "result_count": len(results)}
-    if include_confidence:
-        out["data_confidence"] = sdol.get_epistemic_context()
-    return json.dumps(out, indent=2, default=str)
-
-# ─────────────────────── Baseline Tools ───────────────────────
-
-@tool
-def execute_sql(query: str) -> str:
-    """Execute a SQL query against the Databricks lakehouse and return results as JSON.
-
-    Args:
-        query: A complete, valid Spark SQL query.
-    """
-    try:
-        df = spark.sql(query)
-        records = [row.asDict() for row in df.limit(100).collect()]
-        return json.dumps(records, indent=2, default=str)
-    except Exception as exc:
-        return f"SQL error: {exc}"
-
-
-@tool
-def describe_tables() -> str:
-    """List all benchmark tables and their columns."""
-    info = {}
-    for tbl in ["customers", "products", "orders", "sales_transactions", "revenue_daily"]:
-        cols = [
-            row.col_name
-            for row in spark.sql(f"DESCRIBE {CATALOG}.{SCHEMA}.{tbl}").collect()
-            if not row.col_name.startswith("#")
-        ]
-        info[f"{CATALOG}.{SCHEMA}.{tbl}"] = cols
-    return json.dumps(info, indent=2)
-
-
-baseline_tools = [execute_sql, describe_tables]
-
-# ─────────────────────── SDOL Tools ───────────────────────
-
-@tool
-def sdol_point_lookup(entity: str, id_field: str, id_value: str, fields: str = "") -> str:
-    """Look up a specific record by its identifier via SDOL optimized routing.
-
-    Args:
-        entity: Table name — 'customers', 'products', or 'orders'.
-        id_field: Identifier column name, e.g. 'customer_id'.
-        id_value: Identifier value, e.g. 'C-0042'.
-        fields: Comma-separated columns to return (empty = all).
-    """
-    try:
-        field_list = [f.strip() for f in fields.split(",") if f.strip()] or None
-        intent = sdol.formulator.point_lookup(entity, {id_field: id_value}, fields=field_list)
-        frame = asyncio.run(sdol.query(intent))
-        return _format_frame(frame)
-    except Exception as exc:
-        return json.dumps({"error": str(exc), "data_confidence": sdol.get_epistemic_context()})
-
-
-@tool
-def sdol_aggregate(
-    entity: str,
-    measures: str,
-    dimensions: str,
-    filters: str = "",
-    order_by: str = "",
-) -> str:
-    """Run an aggregate analysis via SDOL (routes to the optimal OLAP backend).
-
-    Args:
-        entity: Table name — 'sales_transactions' or 'revenue_daily'.
-        measures: One or more measures as 'agg(field)' separated by commas.
-                  Examples: 'sum(total_amount)', 'count(order_id), avg(total_amount)'.
-        dimensions: Comma-separated grouping columns, e.g. 'region' or 'region,channel'.
-        filters: Optional filters. Accepts natural syntax separated by semicolons:
-                 'status = completed', 'status:eq:completed', or 'total_amount > 100'.
-        order_by: Optional ordering, e.g. 'sum_total_amount desc'.
-    """
-    import re as _re
-    measure_list = []
-    for m in measures.split(","):
-        m = m.strip()
-        match = _re.match(r"(\w+)\((\w+)\)", m)
-        if match:
-            measure_list.append({"field": match.group(2), "aggregation": match.group(1)})
-        else:
-            measure_list.append({"field": m, "aggregation": "sum"})
-
-    dims = [d.strip() for d in dimensions.split(",") if d.strip()]
-    filter_list = _parse_filters(filters)
-
-    ob = None
-    if order_by and order_by.strip():
-        parts = order_by.strip().rsplit(None, 1)
-        ob_field = parts[0]
-        ob_dir = parts[1] if len(parts) > 1 and parts[1] in ("asc", "desc") else "desc"
-        ob = [{"field": ob_field, "direction": ob_dir}]
-
-    try:
-        intent = sdol.formulator.aggregate_analysis(
-            entity=entity, measures=measure_list, dimensions=dims,
-            filters=filter_list, order_by=ob,
-        )
-        frame = asyncio.run(sdol.query(intent))
-        return _format_frame(frame)
-    except Exception as exc:
-        return json.dumps({"error": str(exc), "data_confidence": sdol.get_epistemic_context()})
-
-
-@tool
-def sdol_temporal_trend(entity: str, metric: str, window: str = "last_90d", granularity: str = "1M") -> str:
-    """Analyze temporal trends via SDOL (routes to OLAP with DATE_TRUNC).
-
-    Args:
-        entity: Table name, e.g. 'sales_transactions' or 'revenue_daily'.
-        metric: Metric column to aggregate, e.g. 'total_amount' or 'total_revenue'.
-        window: Relative time window — 'last_30d', 'last_90d', 'last_1y'.
-        granularity: Time bucket size — '1d' (day), '1w' (week), '1M' (month).
-    """
-    try:
-        intent = sdol.formulator.temporal_trend(
-            entity=entity, metric=metric, window={"relative": window}, granularity=granularity,
-        )
-        frame = asyncio.run(sdol.query(intent))
-        return _format_frame(frame)
-    except Exception as exc:
-        return json.dumps({"error": str(exc), "data_confidence": sdol.get_epistemic_context()})
-
-
-@tool
-def sdol_sql(query: str) -> str:
-    """Execute a raw SQL query with SDOL provenance tracking.
-
-    Use this for complex queries that need JOINs across tables, multiple
-    sub-queries, or anything the other SDOL tools cannot express directly.
-
-    Args:
-        query: A complete Spark SQL query using fully-qualified table names.
-    """
-    try:
-        df = spark.sql(query)
-        records = [row.asDict() for row in df.limit(100).collect()]
-        return json.dumps({
-            "results": records,
-            "result_count": len(records),
-            "note": "Raw SQL — no SDOL provenance tracking for this query.",
-            "data_confidence": sdol.get_epistemic_context(),
-        }, indent=2, default=str)
-    except Exception as exc:
-        return json.dumps({"error": str(exc)})
-
-
-@tool
-def sdol_data_confidence() -> str:
-    """Return a summary of data confidence, trust scores, and quality for all data queried so far."""
-    return sdol.get_epistemic_context()
-
-
-sdol_tools = [sdol_point_lookup, sdol_aggregate, sdol_temporal_trend, sdol_sql, sdol_data_confidence]
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Build LangGraph Agents
-# MAGIC
-# MAGIC Both agents share the same LLM and graph structure — only the **tools** and **system prompt** differ.
-
-# COMMAND ----------
-
-from typing import Annotated, Any, Optional, Sequence, TypedDict
-from databricks_langchain import ChatDatabricks
-from langchain_core.messages import AIMessage, HumanMessage, AnyMessage, SystemMessage
-from langchain_core.runnables import RunnableConfig, RunnableLambda
-from langgraph.graph import END, StateGraph
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt.tool_node import ToolNode
-
-
-class AgentState(TypedDict):
-    messages: Annotated[Sequence[AnyMessage], add_messages]
-
-
-llm = ChatDatabricks(endpoint=LLM_ENDPOINT)
-
-
-def build_agent(tools, system_prompt: str):
-    """Return a compiled LangGraph tool-calling agent."""
-    bound = llm.bind_tools(tools)
-
-    def should_continue(state: AgentState):
-        last = state["messages"][-1]
-        if isinstance(last, AIMessage) and last.tool_calls:
-            return "continue"
-        return "end"
-
-    preprocessor = RunnableLambda(
-        lambda state: [{"role": "system", "content": system_prompt}] + list(state["messages"])
-    )
-    chain = preprocessor | bound
-
-    def call_model(state: AgentState, config: RunnableConfig):
-        return {"messages": [chain.invoke(state, config)]}
-
-    g = StateGraph(AgentState)
-    g.add_node("agent", RunnableLambda(call_model))
-    g.add_node("tools", ToolNode(tools))
-    g.set_entry_point("agent")
-    g.add_conditional_edges("agent", should_continue, {"continue": "tools", "end": END})
-    g.add_edge("tools", "agent")
-    return g.compile()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### System Prompts
-
-# COMMAND ----------
-
-TABLE_SCHEMAS = f"""
-Available tables in `{CATALOG}.{SCHEMA}`:
-
-• customers (OLTP)  — customer_id, name, email, tier, region, signup_date, last_login, lifetime_value, is_active
-• products  (OLTP)  — product_id, name, category, price, stock_quantity, supplier, is_available
-• orders    (OLTP)  — order_id, customer_id, product_id, quantity, unit_price, total_amount, status, created_at, updated_at
-• sales_transactions (OLAP) — transaction_id, customer_id, product_id, quantity, unit_price, total_amount, region, channel, order_date, status
-• revenue_daily      (OLAP) — report_date, region, total_revenue, order_count, avg_order_value
-""".strip()
-
-BASELINE_SYSTEM_PROMPT = f"""You are a data analyst assistant with access to a Databricks lakehouse.
-
-{TABLE_SCHEMAS}
-
-Guidelines:
-- Use `describe_tables` to inspect column names if unsure.
-- Use `execute_sql` to run Spark SQL queries. Always use fully-qualified table names ({CATALOG}.{SCHEMA}.<table>).
-- Present results clearly with actual values. Summarize large result sets.
-- If you are unsure about data quality, say so honestly.
-"""
-
-SDOL_SYSTEM_PROMPT = f"""You are a data analyst assistant enhanced with SDOL (Semantic Data Orchestration Layer).
-
-SDOL automatically routes queries to the optimal backend, generates optimized SQL,
-tracks data provenance (source, freshness, consistency), and computes trust scores.
-
-{TABLE_SCHEMAS}
-
-Available SDOL tools (choose the best match for each question):
-- `sdol_point_lookup`    — look up a single record by ID  (routes → OLTP / Lakebase)
-- `sdol_aggregate`       — aggregations, counts, top-N    (routes → OLAP / DBSQL)
-    measures format: 'sum(total_amount)' or 'count(order_id), avg(total_amount)'
-    filters format: 'status = completed; region = west'  (semicolon-separated)
-- `sdol_temporal_trend`  — time-series bucketed analysis   (routes → OLAP / DBSQL)
-- `sdol_sql`             — raw SQL for JOINs or complex queries that cross tables
-- `sdol_data_confidence` — overall trust & quality summary
-
-Guidelines:
-- For questions that require JOINing two tables (e.g. customer details + their orders),
-  use `sdol_sql` with a proper SQL JOIN using fully-qualified table names ({CATALOG}.{SCHEMA}.<table>).
-- Always include data confidence context in your answer — mention source, trust score, and freshness.
-- When trust scores are below 0.7, explicitly flag reduced confidence.
-- When presenting numbers, cite the source system (e.g. DBSQL / Lakebase).
-"""
-
-# COMMAND ----------
-
-import mlflow
-mlflow.langchain.autolog()
-
-baseline_agent = build_agent(baseline_tools, BASELINE_SYSTEM_PROMPT)
-sdol_agent     = build_agent(sdol_tools, SDOL_SYSTEM_PROMPT)
-
-print("Both agents compiled")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Smoke Test
-
-# COMMAND ----------
-
-def invoke_agent(agent, question: str) -> str:
-    """Run an agent and return the final text response."""
-    result = agent.invoke({"messages": [HumanMessage(content=question)]})
-    last = result["messages"][-1]
-    return last.content if hasattr(last, "content") else str(last)
-
-# Quick sanity check
-q = "How many customers are in the enterprise tier?"
-print("── Baseline ──")
-print(invoke_agent(baseline_agent, q)[:600])
-print("\n── SDOL ──")
-sdol.reset()
-print(invoke_agent(sdol_agent, q)[:600])
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Evaluation Dataset
-# MAGIC
-# MAGIC 10 questions spanning OLTP lookups, OLAP aggregations, cross-paradigm queries, and
-# MAGIC confidence / uncertainty reasoning — the categories where SDOL should shine.
-
-# COMMAND ----------
-
-EVAL_QUESTIONS = [
-    # ── OLTP: Point Lookups ──
-    {
-        "question": "What are the full details for customer C-0042? Include name, tier, region, and lifetime value.",
-        "category": "point_lookup",
-        "expected_response": "Should return the exact row for customer C-0042 from the customers table with name, tier, region, and lifetime_value.",
-    },
-    {
-        "question": "Look up product P-105. What is its category, price, and current stock quantity?",
-        "category": "point_lookup",
-        "expected_response": "Should return the exact row for product P-105 with category, price, and stock_quantity.",
-    },
-    # ── OLAP: Aggregations ──
-    {
-        "question": "What is the total revenue by region for completed transactions? Sort from highest to lowest.",
-        "category": "aggregate",
-        "expected_response": "Should return SUM(total_amount) grouped by region for status='completed', ordered descending.",
-    },
-    {
-        "question": "Which sales channel (online, in_store, mobile) has the highest average order value for completed sales?",
-        "category": "aggregate",
-        "expected_response": "Should return AVG(total_amount) grouped by channel for completed transactions, identifying the top channel.",
-    },
-    {
-        "question": "How many completed orders are there per customer tier? Also show the average order amount per tier.",
-        "category": "aggregate",
-        "expected_response": "Should join or query to get COUNT and AVG(total_amount) grouped by customer tier for completed orders.",
-    },
-    # ── OLAP: Temporal ──
-    {
-        "question": "Show the monthly total revenue trend from the revenue_daily table. Which month had the highest revenue?",
-        "category": "temporal",
-        "expected_response": "Should aggregate revenue_daily by month, showing the trend and identifying the peak month.",
-    },
-    # ── Cross-Paradigm ──
-    {
-        "question": "Who are the top 5 customers by total spending in sales_transactions (completed only)? For each, show customer name and tier.",
-        "category": "cross_paradigm",
-        "expected_response": "Should aggregate sales_transactions by customer_id, then look up customer details for the top 5.",
-    },
-    {
-        "question": "For each region, what is the total revenue from enterprise-tier customers only?",
-        "category": "cross_paradigm",
-        "expected_response": "Should filter customers by tier='enterprise', then aggregate their transactions by region.",
-    },
-    # ── Data Confidence / Uncertainty ──
-    {
-        "question": "How confident should we be in the total revenue numbers for the south region? Are there any data quality concerns?",
-        "category": "confidence",
-        "expected_response": "Should query the data AND communicate confidence level, data freshness, and any limitations.",
-    },
-    {
-        "question": "Give me a summary of overall data quality across all the tables you have access to. What should I be cautious about?",
-        "category": "confidence",
-        "expected_response": "Should introspect data sources and provide a nuanced view of data reliability and coverage.",
-    },
-]
-
-print(f"Evaluation set: {len(EVAL_QUESTIONS)} questions")
-for eq in EVAL_QUESTIONS:
-    print(f"  [{eq['category']:15s}] {eq['question'][:80]}…")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Run Both Agents
-# MAGIC
-# MAGIC Execute every question on both agents, recording responses and latency.
-
-# COMMAND ----------
-
-import pandas as pd
-
-rows = []
-for i, eq in enumerate(EVAL_QUESTIONS):
-    q = eq["question"]
-    cat = eq["category"]
-    print(f"[{i+1}/{len(EVAL_QUESTIONS)}] {cat}: {q[:70]}…")
-
-    # Baseline
-    sdol.reset()
-    t0 = time.time()
-    try:
-        b_resp = invoke_agent(baseline_agent, q)
-    except Exception as exc:
-        b_resp = f"ERROR: {exc}"
-    b_lat = round(time.time() - t0, 2)
-
-    # SDOL
-    sdol.reset()
-    t0 = time.time()
-    try:
-        s_resp = invoke_agent(sdol_agent, q)
-    except Exception as exc:
-        s_resp = f"ERROR: {exc}"
-    s_lat = round(time.time() - t0, 2)
-
-    rows.append({
-        "question": q,
-        "category": cat,
-        "expected_response": eq["expected_response"],
-        "baseline_response": b_resp,
-        "baseline_latency_sec": b_lat,
-        "sdol_response": s_resp,
-        "sdol_latency_sec": s_lat,
-    })
-    print(f"   baseline={b_lat}s  sdol={s_lat}s")
-
-results_df = pd.DataFrame(rows)
-print(f"\nAll {len(results_df)} questions answered.")
-
-# COMMAND ----------
-
-display(spark.createDataFrame(results_df[["question", "category", "baseline_latency_sec", "sdol_latency_sec"]]))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## LLM Judge Evaluation (Databricks-Managed)
-# MAGIC
-# MAGIC We use MLflow's **predefined scorers** (backed by Databricks Foundation Model judges) plus
-# MAGIC a **custom Guidelines scorer** for data-confidence awareness — the metric where SDOL should
-# MAGIC have the clearest advantage.
-
-# COMMAND ----------
-
-from mlflow.genai.scorers import RelevanceToQuery, Safety
-
-try:
-    from mlflow.genai.scorers import Guidelines
-    HAS_GUIDELINES = True
-except ImportError:
-    HAS_GUIDELINES = False
-    print("⚠ Guidelines scorer not available in this MLflow version — using built-in scorers only.")
-
-scorers = [RelevanceToQuery(), Safety()]
-
-if HAS_GUIDELINES:
-    scorers.append(Guidelines(
-        name="data_confidence_awareness",
-        guidelines=(
-            "The response should reference or acknowledge where the data comes from. "
-            "The response should mention data freshness, recency, or staleness when relevant. "
-            "The response should communicate confidence or uncertainty about quantitative claims. "
-            "The response should note any caveats, limitations, or potential data quality issues."
-        ),
-    ))
-    scorers.append(Guidelines(
-        name="response_completeness",
-        guidelines=(
-            "The response should directly and fully answer the question asked. "
-            "The response should include all specifically requested data points or metrics. "
-            "The response should present data in a clear, structured format (tables, lists, etc.). "
-            "The response should not omit important details that were explicitly asked for."
-        ),
-    ))
-
-print(f"Scorers: {[s.__class__.__name__ for s in scorers]}")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Evaluate Baseline Agent
-
-# COMMAND ----------
-
-baseline_eval_data = [
-    {
-        "inputs": {"question": r["question"]},
-        "expected_response": r["expected_response"],
-    }
-    for _, r in results_df.iterrows()
-]
-
-with mlflow.start_run(run_name="baseline_mcp_agent"):
-    baseline_eval = mlflow.genai.evaluate(
-        data=baseline_eval_data,
-        predict_fn=lambda question: results_df.loc[
-            results_df["question"] == question, "baseline_response"
-        ].iloc[0],
-        scorers=scorers,
-    )
-
-print("Baseline evaluation complete")
-baseline_metrics_df = pd.DataFrame([
-    {"metric": k, "value": v} for k, v in baseline_eval.metrics.items()
-])
-display(spark.createDataFrame(baseline_metrics_df))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Evaluate SDOL-Enhanced Agent
-
-# COMMAND ----------
-
-sdol_eval_data = [
-    {
-        "inputs": {"question": r["question"]},
-        "expected_response": r["expected_response"],
-    }
-    for _, r in results_df.iterrows()
-]
-
-with mlflow.start_run(run_name="sdol_enhanced_agent"):
-    sdol_eval = mlflow.genai.evaluate(
-        data=sdol_eval_data,
-        predict_fn=lambda question: results_df.loc[
-            results_df["question"] == question, "sdol_response"
-        ].iloc[0],
-        scorers=scorers,
-    )
-
-print("SDOL evaluation complete")
-sdol_metrics_df = pd.DataFrame([
-    {"metric": k, "value": v} for k, v in sdol_eval.metrics.items()
-])
-display(spark.createDataFrame(sdol_metrics_df))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Results Comparison
-
-# COMMAND ----------
-
-b_metrics = baseline_eval.metrics if hasattr(baseline_eval, "metrics") else {}
-s_metrics = sdol_eval.metrics if hasattr(sdol_eval, "metrics") else {}
-
-all_keys = sorted(set(list(b_metrics.keys()) + list(s_metrics.keys())))
-
-comparison_rows = []
-for k in all_keys:
-    bv = b_metrics.get(k)
-    sv = s_metrics.get(k)
-    delta = None
-    if isinstance(bv, (int, float)) and isinstance(sv, (int, float)):
-        delta = round(sv - bv, 4)
-    comparison_rows.append({"metric": k, "baseline": bv, "sdol_enhanced": sv, "delta": delta})
-
-comparison_df = pd.DataFrame(comparison_rows)
-display(spark.createDataFrame(comparison_df))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Latency Comparison
-
-# COMMAND ----------
-
-latency_summary = pd.DataFrame({
-    "Agent": ["Baseline", "SDOL-Enhanced"],
-    "Mean Latency (s)": [
-        results_df["baseline_latency_sec"].mean(),
-        results_df["sdol_latency_sec"].mean(),
-    ],
-    "Median Latency (s)": [
-        results_df["baseline_latency_sec"].median(),
-        results_df["sdol_latency_sec"].median(),
-    ],
-    "Max Latency (s)": [
-        results_df["baseline_latency_sec"].max(),
-        results_df["sdol_latency_sec"].max(),
-    ],
-})
-display(spark.createDataFrame(latency_summary))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Per-Question Score Comparison
-# MAGIC
-# MAGIC Merge the per-row evaluation tables from both runs for a side-by-side view.
-
-# COMMAND ----------
-
-try:
-    b_table = baseline_eval.tables["eval_results"].rename(
-        columns=lambda c: f"baseline_{c}" if c != "question" else c
-    )
-    s_table = sdol_eval.tables["eval_results"].rename(
-        columns=lambda c: f"sdol_{c}" if c != "question" else c
-    )
-    merged = b_table.merge(s_table, left_index=True, right_index=True, suffixes=("_b", "_s"))
-    display(spark.createDataFrame(merged))
-except Exception:
-    print("Per-row tables not available — see aggregate metrics above.")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Visual Comparison
-
-# COMMAND ----------
-
-import matplotlib.pyplot as plt
-
-score_metrics = [k for k in all_keys if isinstance(b_metrics.get(k), (int, float)) and isinstance(s_metrics.get(k), (int, float))]
-
-if score_metrics:
-    fig, ax = plt.subplots(figsize=(12, 5))
-    x = range(len(score_metrics))
-    width = 0.35
-    ax.bar([i - width/2 for i in x], [b_metrics[k] for k in score_metrics], width, label="Baseline", color="#5B9BD5")
-    ax.bar([i + width/2 for i in x], [s_metrics[k] for k in score_metrics], width, label="SDOL Enhanced", color="#70AD47")
-    ax.set_xticks(list(x))
-    ax.set_xticklabels(score_metrics, rotation=30, ha="right", fontsize=9)
-    ax.set_ylabel("Score")
-    ax.set_title("LLM Judge Scores: Baseline vs SDOL-Enhanced Agent")
-    ax.legend()
-    ax.set_ylim(0, max(max(b_metrics.get(k, 0) for k in score_metrics), max(s_metrics.get(k, 0) for k in score_metrics)) * 1.15)
-    plt.tight_layout()
-    display(fig)
-else:
-    print("No comparable numeric metrics found for charting.")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Sample Response Comparison
-
-# COMMAND ----------
-
-for _, row in results_df.iterrows():
-    print("=" * 100)
-    print(f"CATEGORY: {row['category']}  |  QUESTION: {row['question']}")
-    print("-" * 100)
-    print(f"BASELINE ({row['baseline_latency_sec']}s):\n{row['baseline_response'][:500]}")
-    print("-" * 50)
-    print(f"SDOL ({row['sdol_latency_sec']}s):\n{row['sdol_response'][:500]}")
-    print()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Summary & Interpretation
-# MAGIC
-# MAGIC | Dimension | Expected SDOL Advantage | Why |
-# MAGIC |-----------|------------------------|-----|
-# MAGIC | **Relevance** | Moderate | SDOL routes to the optimal backend; generates correct SQL |
-# MAGIC | **Data Confidence** | Strong | Provenance + trust scores → agent communicates uncertainty |
-# MAGIC | **Completeness** | Moderate | Intent-based tools ensure all requested fields are returned |
-# MAGIC | **Safety** | Neutral | Both agents use the same LLM |
-# MAGIC | **Latency** | Varies | SDOL adds orchestration overhead but generates simpler SQL |
-# MAGIC
-# MAGIC Check the MLflow Experiment UI for full traces, judge rationales, and per-question drilldowns.
+        print(f"\nSlot Type: {slot.type}")
+        print(f"Interpretation: {slot.interpretation_notes}")
+        for i, elem in enumerate(slot.elements):
+            print(f"\n  Element {i+1}:")
+            print(f"    Data: {json.dumps(elem.data, default=str, indent=6) if isinstance(elem.data, dict) else elem.data}")
+            print(f"    --- Provenance ---")
+            print(f"    Source:       {elem.provenance.source_system}")
+            print(f"    Method:       {elem.provenance.retrieval_method}")
+            print(f"    Consistency:  {elem.provenance.consistency}")
+            print(f"    Precision:    {elem.provenance.precision}")
+            print(f"    Staleness:    {elem.provenance.staleness_window_sec}s")
+            print(f"    --- Trust Score ---")
+            print(f"    Composite:    {elem.trust.composite:.3f} ({elem.trust.label})")
+            print(f"    Authority:    {elem.trust.dimensions.source_authority:.3f}")
+            print(f"    Consistency:  {elem.trust.dimensions.consistency_score:.3f}")
+            print(f"    Freshness:    {elem.trust.dimensions.freshness_score:.3f}")
+            print(f"    Precision:    {elem.trust.dimensions.precision_score:.3f}")
+    if frame.trust_summary:
+        print(f"\n  Trust Summary:")
+        print(f"    Overall: {frame.trust_summary.overall_confidence}")
+        print(f"    Lowest:  {frame.trust_summary.lowest_trust_source}")
+        print(f"    Advisory: {frame.trust_summary.advisory}")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ---
-# MAGIC *Benchmark generated by SDOL — Semantic Data Orchestration Layer*
+# MAGIC ## Section 1: Typed Intents with Real Data
+# MAGIC
+# MAGIC ### Intent Formulation: Declaring What You Need
+# MAGIC
+# MAGIC With SDOL, agents do not write SQL. They declare *typed intents* that describe
+# MAGIC the information they need. The framework handles routing, SQL generation,
+# MAGIC execution, and provenance tracking.
+# MAGIC
+# MAGIC Below we create and execute two different intent types against the real fleet data.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 1a. Point Lookup — OLTP (fleet_machines)
+# MAGIC
+# MAGIC A `point_lookup` intent says: "I need the record for machine EXC-0342."
+# MAGIC SDOL routes this to the OLTP connector (Lakebase), which has strong
+# MAGIC consistency guarantees and sub-second latency.
+
+# COMMAND ----------
+
+sdol.reset()
+
+# --- Step 1: Declare the intent ---
+intent_oltp = sdol.formulator.point_lookup("fleet_machines", {"machine_id": "EXC-0342"})
+
+# Show the intent BEFORE execution — this is what the agent declared
+print("INTENT (before execution):")
+print(json.dumps(intent_oltp.model_dump(), indent=2, default=str))
+
+# COMMAND ----------
+
+# --- Step 2: Execute through the Provena pipeline ---
+frame_oltp = asyncio.run(sdol.query(intent_oltp))
+
+# Show the ContextFrame AFTER execution — this is what SDOL returned
+inspect_frame(frame_oltp, "Point Lookup: EXC-0342 from OLTP (fleet_machines)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Notice three things in the output above:
+# MAGIC 1. **Data** — the machine record, just like a SQL query would return
+# MAGIC 2. **Provenance** — source system, retrieval method, consistency level, staleness window
+# MAGIC 3. **Trust Score** — a computed composite score (0-1) with four dimensional breakdowns
+# MAGIC
+# MAGIC The agent did not write SQL. It declared an intent. SDOL did the rest.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 1b. Aggregate Analysis — OLAP (telemetry_daily)
+# MAGIC
+# MAGIC An `aggregate_analysis` intent says: "I need average engine temperature by region."
+# MAGIC SDOL routes this to the OLAP connector (DBSQL) with push-down aggregation —
+# MAGIC the `AVG()` and `GROUP BY` happen inside the SQL engine, not in Python.
+
+# COMMAND ----------
+
+intent_olap = sdol.formulator.aggregate_analysis(
+    entity="telemetry_daily",
+    measures=[{"field": "avg_engine_temp", "aggregation": "avg"}],
+    dimensions=["region"],
+    order_by=[{"field": "avg_avg_engine_temp", "direction": "desc"}],
+)
+
+print("INTENT (before execution):")
+print(json.dumps(intent_olap.model_dump(), indent=2, default=str))
+
+# COMMAND ----------
+
+frame_olap = asyncio.run(sdol.query(intent_olap))
+inspect_frame(frame_olap, "Aggregate Analysis: Avg Engine Temp by Region from OLAP")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC The same Provena pipeline routed this intent to the OLAP connector. The generated
+# MAGIC SQL contains `AVG(avg_engine_temp)` and `GROUP BY region` — push-down aggregation
+# MAGIC means only the small result set crosses the wire, not 90K raw rows.
+# MAGIC
+# MAGIC Check the provenance: the consistency is `EVENTUAL` and the staleness window is
+# MAGIC `900s` (15 minutes) — reflecting the batch nature of the OLAP pipeline.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ---
+# MAGIC ## Section 2: The Connector Pipeline — What Happens Under the Hood
+# MAGIC
+# MAGIC ### Under the Hood: The 4-Stage Connector Pipeline
+# MAGIC
+# MAGIC Every SDOL query goes through four deterministic stages:
+# MAGIC
+# MAGIC ```
+# MAGIC  Intent  -->  interpret  -->  synthesize  -->  execute  -->  normalize
+# MAGIC  (what)       (which?)        (how?)          (run!)       (enrich)
+# MAGIC ```
+# MAGIC
+# MAGIC 1. **Interpret** — The registry finds connectors that can handle this intent type
+# MAGIC 2. **Synthesize** — The chosen connector generates a parameterized query (SQL, VS query, etc.)
+# MAGIC 3. **Execute** — The executor runs the query against the real backend
+# MAGIC 4. **Normalize** — Raw results are wrapped in `ConnectorResult` with provenance attached
+# MAGIC
+# MAGIC Let us trace each stage for a point lookup.
+
+# COMMAND ----------
+
+sdol.reset()
+
+# Step 1: Create the intent
+intent = sdol.formulator.point_lookup("fleet_machines", {"machine_id": "EXC-0100"})
+print("STEP 1 - Intent created:")
+print(f"  Type:   {intent.type}")
+print(f"  Entity: {intent.entity}")
+print(f"  ID:     {intent.identifier}")
+print(f"  Full:   {json.dumps(intent.model_dump(), indent=2, default=str)}")
+
+# COMMAND ----------
+
+# Step 2: Routing — find which connectors can handle this intent
+candidates = registry.find_candidates(intent)
+print("STEP 2 - Routing (connector candidates):")
+for c in candidates:
+    print(f"  Candidate: {c.connector.id}")
+    print(f"    Source system:    {c.capability.source_system}")
+    print(f"    Suitability:     {c.suitability_score:.2f}")
+    print(f"    Entities:        {c.capability.entities}")
+    print(f"    Supported types: {c.capability.supported_intent_types}")
+    print()
+
+if candidates:
+    chosen = candidates[0]
+    print(f"  >> Winner: {chosen.connector.id} (score={chosen.suitability_score:.2f})")
+
+# COMMAND ----------
+
+# Step 3 + 4: Execute through the full Provena pipeline and inspect the result
+frame = asyncio.run(sdol.query(intent))
+inspect_frame(frame, "STEP 3+4 - Execution and Normalization: EXC-0100")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### What each stage contributed:
+# MAGIC
+# MAGIC | Stage | What Happened |
+# MAGIC |-------|---------------|
+# MAGIC | **Interpret** | Registry matched `fleet.oltp` (Lakebase connector) as the best candidate |
+# MAGIC | **Synthesize** | Connector generated `SELECT * FROM catalog.schema.fleet_machines WHERE machine_id = :machine_id` |
+# MAGIC | **Execute** | SparkSQLExecutor ran the query against the lakehouse |
+# MAGIC | **Normalize** | Raw row wrapped in `ConnectorResult` with provenance (source, consistency, staleness, precision) |
+# MAGIC
+# MAGIC The agent never touches SQL. The provenance is attached deterministically.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ---
+# MAGIC ## Section 3: Trust Scoring with Real Sources
+# MAGIC
+# MAGIC ### Trust Scoring: Computed Confidence, Not Guesswork
+# MAGIC
+# MAGIC SDOL computes trust scores across four dimensions for every data element:
+# MAGIC - **Source Authority** — configured weight per source system (e.g., OLTP = 0.95, VS = 0.70)
+# MAGIC - **Consistency** — strong vs eventual consistency guarantees
+# MAGIC - **Freshness** — how stale the data might be (staleness window)
+# MAGIC - **Precision** — exact match vs approximate / similarity-ranked
+# MAGIC
+# MAGIC Below we execute three queries — one per source type — and compare the trust scores.
+
+# COMMAND ----------
+
+sdol.reset()
+
+# Query 1: OLTP point lookup (strong consistency, exact match)
+intent_1 = sdol.formulator.point_lookup("fleet_machines", {"machine_id": "EXC-0001"})
+frame_1 = asyncio.run(sdol.query(intent_1))
+print("Query 1 complete: OLTP point lookup (fleet_machines)")
+
+# Query 2: OLAP aggregation (eventual consistency, aggregated)
+intent_2 = sdol.formulator.aggregate_analysis(
+    entity="telemetry_daily",
+    measures=[{"field": "avg_engine_temp", "aggregation": "avg"}],
+    dimensions=["region"],
+)
+frame_2 = asyncio.run(sdol.query(intent_2))
+print("Query 2 complete: OLAP aggregation (telemetry_daily)")
+
+# Query 3: Vector Search semantic search (similarity-ranked, approximate)
+intent_3 = sdol.formulator.semantic_search(
+    query="hydraulic failure high pressure",
+    collection="maintenance_logs",
+)
+frame_3 = asyncio.run(sdol.query(intent_3))
+print("Query 3 complete: Vector Search semantic search (maintenance_logs)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Trust Score Comparison Table
+
+# COMMAND ----------
+
+trust_rows = []
+
+for label, frame, source_type in [
+    ("OLTP Point Lookup", frame_1, "Lakebase (OLTP)"),
+    ("OLAP Aggregation", frame_2, "DBSQL (OLAP)"),
+    ("Vector Search", frame_3, "VS (Document)"),
+]:
+    for slot in frame.slots:
+        for elem in slot.elements:
+            trust_rows.append({
+                "Query": label,
+                "Source Type": source_type,
+                "Source System": elem.provenance.source_system,
+                "Consistency": str(elem.provenance.consistency),
+                "Staleness (sec)": float(elem.provenance.staleness_window_sec),
+                "Precision": str(elem.provenance.precision),
+                "Trust: Authority": round(elem.trust.dimensions.source_authority, 3),
+                "Trust: Consistency": round(elem.trust.dimensions.consistency_score, 3),
+                "Trust: Freshness": round(elem.trust.dimensions.freshness_score, 3),
+                "Trust: Precision": round(elem.trust.dimensions.precision_score, 3),
+                "Trust: Composite": round(elem.trust.composite, 3),
+                "Trust Label": elem.trust.label,
+            })
+            # Only take the first element per source to keep the table readable
+            break
+
+trust_df = spark.createDataFrame(trust_rows)
+display(trust_df)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Why Each Source Gets Its Score
+# MAGIC
+# MAGIC | Source | Authority | Consistency | Freshness | Precision | Explanation |
+# MAGIC |--------|-----------|-------------|-----------|-----------|-------------|
+# MAGIC | **OLTP (Lakebase)** | 0.95 | High (strong) | High (30s staleness) | High (exact match) | Real-time registry with strong guarantees |
+# MAGIC | **OLAP (DBSQL)** | 0.85 | Lower (eventual) | Lower (900s staleness) | Medium (aggregated) | Batch-updated warehouse — reliable but not real-time |
+# MAGIC | **Vector Search** | 0.70 | Lower (eventual) | Medium (180s staleness) | Lower (similarity) | Semantic results are approximate by nature |
+# MAGIC
+# MAGIC These scores are **computed deterministically** from the connector configuration.
+# MAGIC They do not depend on the LLM's judgment. An agent receiving these scores can
+# MAGIC make calibrated decisions about how much to trust each data source.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ---
+# MAGIC ## Section 4: Conflict Detection in Action
+# MAGIC
+# MAGIC ### Conflict Detection: When Sources Disagree
+# MAGIC
+# MAGIC This is the flagship demo. Machine `EXC-0342` is deliberately seeded with
+# MAGIC a discrepancy:
+# MAGIC - **OLTP** (`fleet_machines`): status = `offline` (real-time, strong consistency)
+# MAGIC - **OLAP** (`telemetry_daily`): last_known_status = `online` (batch, 15-min stale)
+# MAGIC
+# MAGIC A vanilla MCP agent would get both values and either pick one arbitrarily
+# MAGIC or hallucinate a reconciliation. SDOL detects the conflict automatically
+# MAGIC and resolves it using provenance-based heuristics.
+
+# COMMAND ----------
+
+sdol.reset()
+
+# Composite intent: query BOTH OLTP and OLAP for the same machine
+oltp_intent = sdol.formulator.point_lookup("fleet_machines", {"machine_id": "EXC-0342"})
+
+today_str = str(spark.sql("SELECT current_date()").first()[0])
+
+olap_intent = sdol.formulator.aggregate_analysis(
+    entity="telemetry_daily",
+    measures=[{"field": "max_engine_temp", "aggregation": "max"}],
+    dimensions=["machine_id", "last_known_status"],
+    filters=[
+        {"field": "machine_id", "operator": "eq", "value": "EXC-0342"},
+        {"field": "report_date", "operator": "eq", "value": today_str},
+    ],
+)
+
+composite = sdol.formulator.composite(
+    sub_intents=[oltp_intent, olap_intent],
+    fusion_operator="union",
+    fusion_key="machine_id",
+)
+
+print("Composite intent created:")
+print(f"  Sub-intents: {len(composite.sub_intents)}")
+print(f"  Fusion:      {composite.fusion_operator}")
+print(f"  Fusion key:  {composite.fusion_key}")
+print(f"  Today:       {today_str}")
+
+# COMMAND ----------
+
+# Execute the composite query
+frame_conflict = asyncio.run(sdol.query(composite))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Inspect the raw data from both sources
+
+# COMMAND ----------
+
+inspect_frame(frame_conflict, "Composite Query: EXC-0342 from OLTP + OLAP")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Conflicts Detected
+
+# COMMAND ----------
+
+if frame_conflict.conflicts:
+    print(f"\nCONFLICTS DETECTED: {len(frame_conflict.conflicts)}")
+    print("=" * 80)
+    for i, c in enumerate(frame_conflict.conflicts):
+        print(f"\n  Conflict {i+1}:")
+        print(f"    Field:        {c.field}")
+        print(f"    Value A:      {c.value_a} (from {c.element_a.provenance.source_system})")
+        print(f"    Value B:      {c.value_b} (from {c.element_b.provenance.source_system})")
+        print(f"    --- Resolution ---")
+        print(f"    Strategy:     {c.resolution.strategy}")
+        print(f"    Winner:       {c.resolution.winner}")
+        print(f"    Reason:       {c.resolution.reason}")
+else:
+    print("No field-level conflicts detected.")
+    print("(This can happen if the OLAP query returned no rows for today.)")
+    print("Make sure 02_fleet_setup was run recently to seed the conflict row.")
+
+# COMMAND ----------
+
+# Check for presence conflicts (when an expected source returns no data)
+if frame_conflict.presence_conflicts:
+    print(f"\nPRESENCE CONFLICTS: {len(frame_conflict.presence_conflicts)}")
+    print("=" * 80)
+    for i, pc in enumerate(frame_conflict.presence_conflicts):
+        print(f"\n  Presence Conflict {i+1}:")
+        print(f"    Missing source:    {pc.missing_source_system}")
+        print(f"    Missing connector: {pc.missing_connector_id}")
+        print(f"    Resolution:        {pc.resolution.reason}")
+else:
+    print("\nNo presence conflicts — both sources returned data.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Key Insight
+# MAGIC
+# MAGIC OLTP says `offline` (strong consistency, 30s staleness). OLAP says `online`
+# MAGIC (eventual consistency, 900s staleness). SDOL detects this conflict automatically
+# MAGIC and resolves it by preferring the source with stronger consistency guarantees.
+# MAGIC
+# MAGIC The resolution is **deterministic** — it will make the same decision every time,
+# MAGIC regardless of which LLM is downstream. This is not a probabilistic judgment.
+# MAGIC It is a computed decision based on the provenance metadata.
+# MAGIC
+# MAGIC A vanilla MCP agent receiving both values would have to rely on the LLM to
+# MAGIC notice the discrepancy and reason about it. Sometimes it would. Sometimes
+# MAGIC it would not. SDOL makes this detection and resolution **structural**.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ---
+# MAGIC ## Section 5: Epistemic Context — The Agent's Data Quality Briefing
+# MAGIC
+# MAGIC ### Epistemic Context: The Agent's Data Quality Briefing
+# MAGIC
+# MAGIC After executing queries, SDOL accumulates an epistemic context — a structured
+# MAGIC summary of data quality, trust scores, conflicts, and caveats. This context
+# MAGIC is designed to be injected into the LLM's system prompt so the agent can
+# MAGIC reason about data quality and communicate uncertainty.
+
+# COMMAND ----------
+
+# The epistemic context was built up from all the queries above
+epistemic_prompt = sdol.get_epistemic_context()
+
+print("FULL EPISTEMIC CONTEXT (injected into LLM system prompt):")
+print("=" * 80)
+print(epistemic_prompt)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Side-by-Side: Vanilla MCP vs Provena-Enhanced Agent
+
+# COMMAND ----------
+
+# Simulate what a vanilla MCP agent sees vs what an SDOL-enhanced agent sees
+
+# --- LEFT: Vanilla MCP agent ---
+vanilla_data = {
+    "machine_id": "EXC-0342",
+    "status": "offline",
+    "model": "Model X",
+    "firmware_version": "v2.1",
+    "region": "north_america",
+}
+
+# --- RIGHT: SDOL-enhanced agent ---
+sdol_data_elements = []
+for slot in frame_conflict.slots:
+    for elem in slot.elements:
+        sdol_data_elements.append({
+            "data": elem.data,
+            "provenance": {
+                "source": elem.provenance.source_system,
+                "consistency": str(elem.provenance.consistency),
+                "staleness_sec": elem.provenance.staleness_window_sec,
+                "precision": str(elem.provenance.precision),
+            },
+            "trust": {
+                "composite": round(elem.trust.composite, 3),
+                "label": elem.trust.label,
+            },
+        })
+
+conflicts_summary = []
+for c in frame_conflict.conflicts:
+    conflicts_summary.append({
+        "field": c.field,
+        "source_a": c.element_a.provenance.source_system,
+        "value_a": c.value_a,
+        "source_b": c.element_b.provenance.source_system,
+        "value_b": c.value_b,
+        "winner": c.resolution.winner,
+        "strategy": c.resolution.strategy,
+    })
+
+print("=" * 80)
+print("  LEFT: What a vanilla MCP agent sees")
+print("=" * 80)
+print(json.dumps(vanilla_data, indent=2, default=str))
+print()
+print("  (No provenance. No trust score. No conflict detection.)")
+print("  (The LLM must figure out data quality on its own.)")
+
+print()
+print("=" * 80)
+print("  RIGHT: What an SDOL-enhanced agent sees")
+print("=" * 80)
+print(json.dumps({
+    "data_elements": sdol_data_elements,
+    "conflicts": conflicts_summary,
+    "epistemic_summary": "(see full epistemic prompt above)",
+}, indent=2, default=str))
+print()
+print("  (Provenance attached. Trust scored. Conflicts detected and resolved.)")
+print("  (The LLM receives a structured briefing on data quality.)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC The difference is structural, not cosmetic. The vanilla agent gets raw JSON and
+# MAGIC must rely on the LLM to notice quality issues. The SDOL agent gets a
+# MAGIC deterministic data-quality briefing that the LLM can reference in its response.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ---
+# MAGIC ## Section 6: Semantic Search with Provenance
+# MAGIC
+# MAGIC ### Semantic Search: Vector Search with Provenance
+# MAGIC
+# MAGIC Even similarity-ranked results from Vector Search carry full provenance
+# MAGIC metadata. The trust score will be lower (approximate matching, eventual
+# MAGIC consistency) but the metadata is still present and useful.
+
+# COMMAND ----------
+
+sdol.reset()
+
+intent_vs = sdol.formulator.semantic_search(
+    query="hydraulic failure high pressure",
+    collection="maintenance_logs",
+)
+
+frame_vs = asyncio.run(sdol.query(intent_vs))
+inspect_frame(frame_vs, "Semantic Search: 'hydraulic failure high pressure'")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Semantic Results with Trust Scores
+
+# COMMAND ----------
+
+vs_rows = []
+for slot in frame_vs.slots:
+    for i, elem in enumerate(slot.elements):
+        record = {
+            "rank": i + 1,
+            "source": elem.provenance.source_system,
+            "trust_composite": round(elem.trust.composite, 3),
+            "trust_label": elem.trust.label,
+            "consistency": str(elem.provenance.consistency),
+            "precision": str(elem.provenance.precision),
+        }
+        if isinstance(elem.data, dict):
+            record["machine_id"] = elem.data.get("machine_id", "")
+            record["fault_category"] = elem.data.get("fault_category", "")
+            record["severity"] = elem.data.get("severity", "")
+            desc = elem.data.get("description", "")
+            record["description_preview"] = desc[:100] + "..." if len(desc) > 100 else desc
+        vs_rows.append(record)
+
+if vs_rows:
+    vs_df = spark.createDataFrame(vs_rows)
+    display(vs_df)
+else:
+    print("No results returned from Vector Search.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Notice that every semantic search result carries the same provenance envelope
+# MAGIC as a SQL query result. The trust score reflects the approximate nature of
+# MAGIC similarity search (lower precision score), but the agent still knows exactly
+# MAGIC where the data came from, how fresh it is, and how confident it should be.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ---
+# MAGIC ## Section 7: The Full Picture — Determinism Wrapping Probabilism
+# MAGIC
+# MAGIC ### Putting It All Together
+# MAGIC
+# MAGIC The core value proposition of SDOL is not making the agent smarter.
+# MAGIC The LLM is already capable of noticing data quality issues — sometimes.
+# MAGIC The problem is "sometimes."
+# MAGIC
+# MAGIC SDOL adds **deterministic guarantees** around the probabilistic LLM:
+# MAGIC
+# MAGIC | Property | Without SDOL | With SDOL |
+# MAGIC |----------|-------------|-----------|
+# MAGIC | **Provenance** | Not tracked | ALWAYS tracked — every element has source, freshness, consistency |
+# MAGIC | **Conflict detection** | Depends on LLM noticing | ALWAYS detected — structural comparison of overlapping fields |
+# MAGIC | **Trust scoring** | Not computed | ALWAYS scored — 4-dimensional composite with configured authority weights |
+# MAGIC | **Audit trail** | Not available | ALWAYS available — full epistemic context for every session |
+# MAGIC | **SQL generation** | LLM writes SQL (error-prone) | SDOL generates parameterized queries from typed intents |
+# MAGIC | **Token efficiency** | Raw rows dumped into context | Pre-aggregated results with push-down computation |
+# MAGIC
+# MAGIC The value is not intelligence — it is **auditability and consistency**.
+# MAGIC The LLM can be swapped out. The guarantees remain.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Execution Cost Summary
+
+# COMMAND ----------
+
+cost_summary = sdol.get_cost_summary()
+print("SDOL Session Cost Summary:")
+print(json.dumps(cost_summary, indent=2, default=str))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC The cost summary shows execution time by source across all queries in this
+# MAGIC session. This metadata is useful for:
+# MAGIC - Identifying slow connectors
+# MAGIC - Budgeting compute costs across source types
+# MAGIC - Optimizing which queries to cache vs re-execute
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ---
+# MAGIC ### Next Steps
+# MAGIC
+# MAGIC - **`02_fleet_setup`** — Creates the benchmark data tables and Vector Search index
+# MAGIC   (run this first if you have not already)
+# MAGIC - **`03_fleet_benchmark`** — Head-to-head agent evaluation: a vanilla MCP agent
+# MAGIC   vs an SDOL-enhanced agent answering the same questions, scored by LLM judges
+# MAGIC
+# MAGIC ---
+# MAGIC *SDOL — Semantic Data Orchestration Layer*

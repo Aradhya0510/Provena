@@ -2,11 +2,11 @@
 
 import pytest
 
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.connectors.oltp.generic import GenericOLTPConnector
-from sdol.types.context import ContextSlotType
-from sdol.types.errors import InvalidIntentError
-from sdol.types.intent import (
+from provena.connectors.executor import MockQueryExecutor
+from provena.connectors.oltp.generic import GenericOLTPConnector
+from provena.types.context import ContextSlotType
+from provena.types.errors import InvalidIntentError
+from provena.types.intent import (
     AggregateAnalysisIntent,
     MeasureSpec,
     PointLookupIntent,
@@ -74,7 +74,7 @@ class TestGenericOLTPConnector:
             await connector.execute(intent)
 
     def test_query_builder_applies_optimizations(self) -> None:
-        from sdol.connectors.oltp.query import build_point_lookup_query
+        from provena.connectors.oltp.query import build_point_lookup_query
         intent = PointLookupIntent(
             id="i-1",
             entity="customer",

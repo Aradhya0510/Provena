@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Fleet Management: Data Setup
 # MAGIC
-# MAGIC Creates the synthetic data landscape for the SDOL fleet-management showcase.
+# MAGIC Creates the synthetic data landscape for the Provena fleet-management showcase.
 # MAGIC The scenario models a heavy-machinery manufacturer with excavators, generators,
 # MAGIC and industrial equipment deployed globally.
 # MAGIC
@@ -237,7 +237,7 @@ conflict_row = spark.createDataFrame([Row(
     report_date=spark.sql("SELECT current_date()").first()[0],
     avg_engine_temp=105.3,
     max_engine_temp=125.0,
-    avg_rpm=2100,
+    avg_rpm=2100.0,
     avg_fuel_efficiency=16.2,
     min_fuel_efficiency=14.8,
     reading_count=4,
@@ -368,7 +368,7 @@ display(spark.sql(f"""
 # MAGIC ## 5 — Databricks Vector Search Index
 # MAGIC
 # MAGIC Creates a VS endpoint (if needed) and a delta-sync index on `maintenance_logs.description`
-# MAGIC so the SDOL benchmark can perform real semantic search.
+# MAGIC so the Provena benchmark can perform real semantic search.
 
 # COMMAND ----------
 

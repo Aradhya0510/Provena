@@ -2,8 +2,8 @@
 
 import pytest
 
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.core.provenance.trust_scorer import TrustScorer
+from provena.connectors.executor import MockQueryExecutor
+from provena.core.provenance.trust_scorer import TrustScorer
 
 
 @pytest.fixture

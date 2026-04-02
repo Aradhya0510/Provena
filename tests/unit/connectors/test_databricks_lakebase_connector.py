@@ -2,16 +2,16 @@
 
 import pytest
 
-from sdol.extensions.databricks.oltp.lakebase import DatabricksLakebaseConnector
-from sdol.extensions.databricks.oltp.lakebase_query import (
+from provena.extensions.databricks.oltp.lakebase import DatabricksLakebaseConnector
+from provena.extensions.databricks.oltp.lakebase_query import (
     build_lakebase_batch_lookup,
     build_lakebase_point_lookup,
     build_lakebase_simple_aggregate,
 )
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.types.context import ContextSlotType
-from sdol.types.errors import InvalidIntentError
-from sdol.types.intent import (
+from provena.connectors.executor import MockQueryExecutor
+from provena.types.context import ContextSlotType
+from provena.types.errors import InvalidIntentError
+from provena.types.intent import (
     AggregateAnalysisIntent,
     FilterClause,
     MeasureSpec,

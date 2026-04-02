@@ -2,17 +2,17 @@
 
 import pytest
 
-from sdol.extensions.databricks.olap.dbsql import DatabricksDBSQLConnector
-from sdol.extensions.databricks.olap.dbsql_query import (
+from provena.extensions.databricks.olap.dbsql import DatabricksDBSQLConnector
+from provena.extensions.databricks.olap.dbsql_query import (
     build_dbsql_aggregate_query,
     build_dbsql_temporal_query,
     parse_relative_window,
 )
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.types.context import ContextSlotType
-from sdol.types.errors import InvalidIntentError
-from sdol.types.provenance import ConsistencyGuarantee
-from sdol.types.intent import (
+from provena.connectors.executor import MockQueryExecutor
+from provena.types.context import ContextSlotType
+from provena.types.errors import InvalidIntentError
+from provena.types.provenance import ConsistencyGuarantee
+from provena.types.intent import (
     AggregateAnalysisIntent,
     FilterClause,
     MeasureSpec,

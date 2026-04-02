@@ -2,22 +2,22 @@
 
 import pytest
 
-from sdol.extensions.databricks.document.vector_search import (
+from provena.extensions.databricks.document.vector_search import (
     DatabricksVectorSearchConnector,
 )
-from sdol.extensions.databricks.document.vector_search_query import (
+from provena.extensions.databricks.document.vector_search_query import (
     DatabricksVSQuery,
     build_vs_similarity_query,
 )
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.types.context import ContextSlotType
-from sdol.types.errors import InvalidIntentError
-from sdol.types.intent import (
+from provena.connectors.executor import MockQueryExecutor
+from provena.types.context import ContextSlotType
+from provena.types.errors import InvalidIntentError
+from provena.types.intent import (
     FilterClause,
     PointLookupIntent,
     SemanticSearchIntent,
 )
-from sdol.types.provenance import ConsistencyGuarantee
+from provena.types.provenance import ConsistencyGuarantee
 
 
 class TestDatabricksVectorSearchConnector:

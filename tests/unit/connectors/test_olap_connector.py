@@ -2,11 +2,11 @@
 
 import pytest
 
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.connectors.olap.generic import GenericOLAPConnector
-from sdol.types.context import ContextSlotType
-from sdol.types.errors import InvalidIntentError
-from sdol.types.intent import (
+from provena.connectors.executor import MockQueryExecutor
+from provena.connectors.olap.generic import GenericOLAPConnector
+from provena.types.context import ContextSlotType
+from provena.types.errors import InvalidIntentError
+from provena.types.intent import (
     AggregateAnalysisIntent,
     MeasureSpec,
     PointLookupIntent,
@@ -122,7 +122,7 @@ class TestGenericOLAPConnector:
         assert result.entity_keys == ["C-1"]
 
     def test_query_builder_applies_optimizations(self) -> None:
-        from sdol.connectors.olap.query import build_aggregate_query
+        from provena.connectors.olap.query import build_aggregate_query
         intent = AggregateAnalysisIntent(
             id="i-1",
             entity="orders",

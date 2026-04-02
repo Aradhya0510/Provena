@@ -1,47 +1,51 @@
-# SDOL — Semantic Data Orchestration Layer
+# Provena — Epistemic Provenance for AI Agents
 
-**Storage-aware agent middleware that replaces flat context windows with structured, provenance-enriched context frames.**
+**Epistemic provenance for AI agents — every datum carries verifiable knowledge about its own origin, reliability, and limits.**
 
-SDOL sits between AI agents and their data sources. When an agent needs data, it declares *what* it wants (an intent) — never *how* to get it. SDOL handles routing, execution, provenance tracking, trust scoring, conflict resolution, and epistemic context generation automatically.
+Provena sits between AI agents and their data sources. When an agent needs data, it declares *what* it wants (an intent) — never *how* to get it. Provena handles routing, execution, provenance tracking, trust scoring, conflict resolution, and epistemic context generation automatically.
+
+The foundational principle is **epistemic provenance**: data alone is not enough — the agent must also receive *knowledge about the knowledge*. Where did this number come from? How fresh is it? How consistent is the source? Do other sources agree? What should the agent do when they don't? These are epistemic questions that cannot be answered by the data itself. Provena answers them structurally, at retrieval time, with machine-verifiable metadata — not probabilistically, after the fact, by the LLM.
 
 ---
 
 ## The Problem
 
-Today's AI agents consume data through flat context windows — raw text dumps with no metadata about where the data came from, how fresh it is, whether sources agree, or how much to trust any given fact. This leads to:
+Modern LLMs produce correct answers without middleware — they write valid SQL, aggregate properly, and summarize cleanly. But correct answers carry no epistemic provenance. The agent knows *what* the data says but not *why it should be trusted*. This creates four operational risks:
 
-- **Hallucination amplification** — stale or low-quality data treated with the same confidence as authoritative sources
-- **Source blindness** — the agent can't distinguish a cached estimate from an exact database query
-- **Conflict ignorance** — when two sources disagree, the agent has no framework to reason about which to trust
-- **Paradigm lock-in** — agents hard-coded to one data source can't seamlessly query across OLAP, OLTP, document stores, and more
+- **No epistemic trail** — agents produce answers but cannot prove where data came from, when it was retrieved, or how reliable the source is. Every claim is epistemically ungrounded: the agent cannot distinguish a strongly-consistent real-time lookup from a stale cached estimate. Regulatory and compliance reviews require machine-verifiable provenance, not LLM-generated citations.
+- **Cost at scale** — raw data dumped into context windows burns tokens. A single cross-source query can push hundreds of thousands of rows into the context window when a single aggregated number would suffice. In benchmarks, this overhead measured 25x (1.26M context chars vs 50K for the same 7 questions).
+- **Probabilistic epistemic behavior** — LLMs *might* notice data quality issues (staleness, low confidence), or *might not*. Whether an agent flags stale data or mentions consistency caveats is a matter of probability, not guarantee. Epistemic integrity — reliably communicating what is known, what is uncertain, and what is conflicting — cannot depend on probabilistic behavior.
+- **Cross-source inconsistency** — when two sources disagree on the same entity (e.g., a real-time registry says "offline" but a batch warehouse says "online"), there is no deterministic resolution framework. The LLM may silently pick one value or fabricate a reconciliation. Without epistemic provenance attached to each source, no principled resolution is possible.
 
-## How SDOL Solves This
+## How Provena Solves This
 
-SDOL introduces a semantic layer that:
+Provena introduces an **epistemic provenance layer** — a middleware that ensures every piece of data reaching the agent carries verifiable metadata about its origin, reliability, and epistemic status:
 
 1. **Typed intents** — 8 declarative intent types (`point_lookup`, `aggregate_analysis`, `temporal_trend`, `semantic_search`, `graph_traversal`, `ontology_query`, `composite`, `escape_hatch`) that describe what the agent needs, not how to retrieve it
-2. **Typed connectors** — storage-aware adapters that translate intents into native queries. Each declares its capabilities (supported intents, latency, features) so the router can pick the best backend automatically
-3. **Provenance tracking** — every data element carries a `ProvenanceEnvelope` with source system, retrieval method, consistency guarantee, precision class, and freshness
-4. **Trust scoring** — four-dimensional scoring (authority, consistency, freshness, precision) produces a composite 0–1 confidence signal per element
-5. **Conflict resolution** — when sources disagree on the same entity, heuristic resolution picks the freshest, most authoritative, or most consistent source — or defers to the agent
-6. **Epistemic context** — a generated summary injected into the agent's prompt that warns about low-trust data, unresolved conflicts, and overall confidence levels
+2. **Typed connectors** — storage-aware adapters that translate intents into native queries optimized for each paradigm (OLAP, OLTP, document, graph). Each declares its capabilities so the router can pick the best backend automatically
+3. **Provenance envelopes** — every data element carries a `ProvenanceEnvelope`: source system, retrieval method, consistency guarantee (strong, eventual, best-effort), precision class (exact, aggregate, estimated, similarity-ranked), and freshness. This is the epistemic birth certificate — attached at retrieval time, not generated by the LLM
+4. **Trust scoring** — four-dimensional scoring (authority, consistency, freshness, precision) produces a composite 0–1 confidence signal per element. Trust is *computed from epistemic metadata*, not estimated by the model
+5. **Conflict resolution** — when sources disagree on the same entity, heuristic resolution uses epistemic provenance (consistency guarantees, authority rankings, freshness) to pick the most trustworthy source — or defers to the agent with full context
+6. **Epistemic context** — a generated summary injected into the agent's prompt that synthesizes provenance, trust, and conflict signals into a data-quality briefing. The agent receives not just data but *knowledge about the data's epistemic standing*
 
 ---
 
-## Why SDOL — "The LLM Is Already Smart Enough"
+## Why Provena — "The LLM Is Already Smart Enough"
 
-Modern LLMs like Claude Sonnet can write correct SQL, produce clean aggregations, and generate well-structured answers without SDOL. So why add a middleware layer?
+Modern LLMs produce correct answers without middleware. So why add a layer?
 
-**Because correctness is not the same as auditability.**
+**Because the LLM has no epistemic provenance for the data it consumes.**
 
-SDOL's value is not in making the agent *smarter* — it's in making the agent *auditable*:
+The agent can write perfect SQL and produce a clean summary. But it cannot tell you whether the number it just cited came from a strongly-consistent real-time source or a 15-minute-stale batch table. It cannot guarantee that it noticed two sources contradicted each other. It cannot prove that its confidence assessment is based on objective metadata rather than a guess. These are epistemic gaps — and they are structural, not solvable by better prompting or smarter models.
 
-- **Provenance is structural, not hallucinatable.** When SDOL says data came from the OLTP registry with 30s staleness and strong consistency, that's a verified fact attached at retrieval time — not something the LLM inferred or guessed. No prompt engineering can produce this.
-- **Conflict detection is automatic.** When the OLTP registry says a machine is offline but the OLAP batch table says online, SDOL detects the disagreement *before* it reaches the LLM and resolves it using provenance heuristics. Without SDOL, the agent silently picks one or hallucinates a reconciliation.
-- **Trust scores are computed, not estimated.** Each data element carries a four-dimensional trust signal (authority, consistency, freshness, precision) computed from actual source metadata. The LLM can reason over concrete numbers instead of making qualitative guesses.
-- **Token efficiency is a side effect.** SDOL's push-down execution (aggregating inside the database, targeted vector search) means the agent's context window receives compact results instead of raw rows. This matters at scale — 360K telemetry rows vs. a single aggregated number.
+Provena closes them:
 
-**In short:** SDOL makes your agent auditable, not just capable. The agent can explain *why* it trusts a piece of data, not just *what* the data says.
+- **Provenance is structural, not LLM-generated.** When Provena says data came from the OLTP registry with 30s staleness and strong consistency, that's a verified fact attached at retrieval time. The LLM receives epistemic metadata it can cite but could never have produced on its own.
+- **Conflict detection is deterministic.** When the OLTP registry says a machine is offline but the OLAP batch table says online, Provena detects the disagreement *every time* and resolves it using provenance-based heuristics. Without epistemic provenance, the agent might notice the conflict or might not — it's probabilistic.
+- **Trust scores are computed from epistemic metadata.** Each data element carries a four-dimensional trust signal (authority, consistency, freshness, precision) computed from the provenance envelope. The LLM can reason over concrete numbers instead of making qualitative guesses about data reliability.
+- **Token efficiency is a structural side effect.** Provena's push-down execution (aggregating inside the database, targeted vector search) means the agent's context window receives compact results instead of raw rows. In benchmarks, Provena reduced intermediate context window consumption by 25x (50K chars vs 1.26M chars across 7 questions) — a direct cost reduction at scale.
+
+**In short:** Provena gives your agent epistemic provenance — the ability to know *what it knows*, *how well it knows it*, and *where the limits of its knowledge are*. The agent becomes not just capable, but epistemically grounded.
 
 ---
 
@@ -51,12 +55,12 @@ SDOL's value is not in making the agent *smarter* — it's in making the agent *
 ┌──────────────────────────────────────────────────────────────────────┐
 │                           Agent / LLM                                │
 │                                                                      │
-│   formulate intent ──▶  SDOL.query(intent)  ──▶  ContextFrame       │
+│   formulate intent ──▶  Provena.query(intent)  ──▶  ContextFrame       │
 │                                                  + epistemic prompt   │
 └──────────────────────────┬───────────────────────────────────────────┘
                            │
 ┌──────────────────────────▼───────────────────────────────────────────┐
-│                          SDOL SDK                                     │
+│                          Provena SDK                                     │
 │                                                                      │
 │   IntentFormulator ──▶ SemanticRouter ──▶ ContextCompiler            │
 │                              │                    │                   │
@@ -83,9 +87,9 @@ SDOL's value is not in making the agent *smarter* — it's in making the agent *
 Each layer is independent and composable:
 - **Intent layer** — Pydantic v2 models with discriminated unions, validated at construction time
 - **Router layer** — decomposes composites, plans execution topology, estimates cost, routes to connectors
-- **Connector layer** — three-tier model: foundation (`BaseConnector`), paradigm bases (`BaseOLAPConnector`, `BaseOLTPConnector`, `BaseDocumentConnector`), and provider extensions (in `src/sdol/extensions/`) with pluggable executors
-- **Context layer** — assembles typed slots, detects cross-source conflicts, resolves via heuristics
-- **Epistemic layer** — aggregates trust signals into an LLM-injectable prompt
+- **Connector layer** — three-tier model: foundation (`BaseConnector`), paradigm bases (`BaseOLAPConnector`, `BaseOLTPConnector`, `BaseDocumentConnector`), and provider extensions (in `src/provena/extensions/`) with pluggable executors. Each connector attaches provenance metadata native to its paradigm's consistency model
+- **Context layer** — assembles typed slots, detects cross-source conflicts, resolves via epistemic heuristics (consistency, authority, freshness)
+- **Epistemic layer** — synthesizes provenance and trust signals into an LLM-injectable prompt — the mechanism through which epistemic provenance reaches the agent
 
 For the full technical deep-dive, see [Architecture](docs/architecture.md).
 
@@ -102,11 +106,11 @@ python -m pytest tests/ -v   # 254 tests
 
 ```python
 import asyncio
-from sdol import SDOL, CapabilityRegistry, ContextCompiler, GenericOLTPConnector, SemanticRouter, TrustScorer
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.core.router.cost_estimator import CostEstimator
-from sdol.core.router.intent_decomposer import IntentDecomposer
-from sdol.core.router.query_planner import QueryPlanner
+from provena import Provena, CapabilityRegistry, ContextCompiler, GenericOLTPConnector, SemanticRouter, TrustScorer
+from provena.connectors.executor import MockQueryExecutor
+from provena.core.router.cost_estimator import CostEstimator
+from provena.core.router.intent_decomposer import IntentDecomposer
+from provena.core.router.query_planner import QueryPlanner
 
 async def main():
     executor = MockQueryExecutor(records=[
@@ -115,14 +119,14 @@ async def main():
     registry = CapabilityRegistry()
     registry.register(GenericOLTPConnector(executor=executor))
 
-    sdol = SDOL(SemanticRouter(
+    engine = Provena(SemanticRouter(
         QueryPlanner(registry, IntentDecomposer(), CostEstimator()),
         ContextCompiler(TrustScorer()),
         registry,
     ))
 
-    frame = await sdol.query(
-        sdol.formulator.point_lookup("customer", {"customer_id": "C-1042"})
+    frame = await engine.query(
+        engine.formulator.point_lookup("customer", {"customer_id": "C-1042"})
     )
 
     for slot in frame.slots:
@@ -138,16 +142,16 @@ asyncio.run(main())
 
 Connectors follow a three-tier architecture: **Foundation** (`BaseConnector`) → **Paradigm bases** (`BaseOLAPConnector`, `BaseOLTPConnector`, `BaseDocumentConnector`) → **Provider extensions**.
 
-Core paradigm bases and generic connectors live in `src/sdol/connectors/`. Provider-specific extensions live in `src/sdol/extensions/<provider>/` and are installed via optional dependencies (e.g., `pip install sdol[databricks]`).
+Core paradigm bases and generic connectors live in `src/provena/connectors/`. Provider-specific extensions live in `src/provena/extensions/<provider>/` and are installed via optional dependencies (e.g., `pip install provena[databricks]`).
 
 | Paradigm | Base Class | Provider | Class | Location | Intent Types |
 |----------|-----------|----------|-------|----------|-------------|
-| OLAP | `BaseOLAPConnector` | Generic (Snowflake, etc.) | `GenericOLAPConnector` | `src/sdol/connectors/olap/` | `aggregate_analysis`, `temporal_trend` |
-| OLAP | `BaseOLAPConnector` | Databricks SQL Warehouse | `DatabricksDBSQLConnector` | `src/sdol/extensions/databricks/olap/` | `aggregate_analysis`, `temporal_trend` |
-| OLTP | `BaseOLTPConnector` | Generic (PostgreSQL, etc.) | `GenericOLTPConnector` | `src/sdol/connectors/oltp/` | `point_lookup`, `aggregate_analysis` |
-| OLTP | `BaseOLTPConnector` | Databricks Lakebase | `DatabricksLakebaseConnector` | `src/sdol/extensions/databricks/oltp/` | `point_lookup`, `aggregate_analysis` |
-| Document | `BaseDocumentConnector` | Generic (Pinecone, etc.) | `GenericDocumentConnector` | `src/sdol/connectors/document/` | `semantic_search` |
-| Document | `BaseDocumentConnector` | Databricks Vector Search | `DatabricksVectorSearchConnector` | `src/sdol/extensions/databricks/document/` | `semantic_search` |
+| OLAP | `BaseOLAPConnector` | Generic (Snowflake, etc.) | `GenericOLAPConnector` | `src/provena/connectors/olap/` | `aggregate_analysis`, `temporal_trend` |
+| OLAP | `BaseOLAPConnector` | Databricks SQL Warehouse | `DatabricksDBSQLConnector` | `src/provena/extensions/databricks/olap/` | `aggregate_analysis`, `temporal_trend` |
+| OLTP | `BaseOLTPConnector` | Generic (PostgreSQL, etc.) | `GenericOLTPConnector` | `src/provena/connectors/oltp/` | `point_lookup`, `aggregate_analysis` |
+| OLTP | `BaseOLTPConnector` | Databricks Lakebase | `DatabricksLakebaseConnector` | `src/provena/extensions/databricks/oltp/` | `point_lookup`, `aggregate_analysis` |
+| Document | `BaseDocumentConnector` | Generic (Pinecone, etc.) | `GenericDocumentConnector` | `src/provena/connectors/document/` | `semantic_search` |
+| Document | `BaseDocumentConnector` | Databricks Vector Search | `DatabricksVectorSearchConnector` | `src/provena/extensions/databricks/document/` | `semantic_search` |
 
 All connectors use the `QueryExecutor` protocol — swap `MockQueryExecutor` for a real implementation to connect to production databases. To add a new provider, subclass the appropriate paradigm base and implement only `synthesize_query()` + `get_performance()`.
 
@@ -157,13 +161,14 @@ All connectors use the `QueryExecutor` protocol — swap `MockQueryExecutor` for
 
 | Concept | Description |
 |---------|-------------|
+| **Epistemic Provenance** | The foundational principle: every datum carries verifiable knowledge about its own origin, reliability, and limits — attached at retrieval time, not generated by the LLM |
 | **Intent** | Declarative "what I want to know" — 8 typed intents, Pydantic-validated, never prescribes retrieval strategy |
-| **Typed Connector** | Storage-aware adapter with a 4-stage pipeline: interpret → synthesize → execute → normalize |
-| **Provenance Envelope** | Source system, retrieval method, consistency guarantee, precision class, staleness window |
-| **Trust Score** | Composite 0–1 confidence from four dimensions: authority, consistency, freshness, precision |
-| **Context Frame** | Typed slots (STRUCTURED, TEMPORAL, UNSTRUCTURED, etc.) + detected conflicts + aggregate stats |
+| **Typed Connector** | Storage-aware adapter with a 4-stage pipeline: interpret → synthesize → execute → normalize. Each paradigm (OLAP, OLTP, document) produces provenance metadata native to its consistency model |
+| **Provenance Envelope** | The epistemic birth certificate: source system, retrieval method, consistency guarantee, precision class, staleness window |
+| **Trust Score** | Composite 0–1 confidence computed from epistemic metadata across four dimensions: authority, consistency, freshness, precision |
+| **Context Frame** | Typed slots (STRUCTURED, TEMPORAL, UNSTRUCTURED, etc.) + detected conflicts + trust summary — the epistemic replacement for flat context windows |
 | **Capability Registry** | Routes intents to connectors via suitability scoring (entity match, latency, capability alignment) |
-| **Epistemic Tracker** | Generates LLM-injectable summaries of data confidence, low-trust warnings, and unresolved conflicts |
+| **Epistemic Tracker** | Synthesizes provenance, trust, and conflict signals into an LLM-injectable briefing — the agent's epistemic awareness of its own data quality |
 
 ---
 
@@ -193,7 +198,7 @@ python examples/with_mcp_server.py      # MCP adapter integration
 
 ## Project Stats
 
-- 68 Python source files in `src/sdol/` (core + provider extensions)
+- 68 Python source files in `src/provena/` (core + provider extensions)
 - 23 test files, 254 tests passing
 - 3 example scripts
 - 5 benchmark scripts in `databricks_test/`

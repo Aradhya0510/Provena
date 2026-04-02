@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from sdol.core.provenance.trust_scorer import TrustScorer, TrustScorerConfig
-from sdol.types.provenance import (
+from provena.core.provenance.trust_scorer import TrustScorer, TrustScorerConfig
+from provena.types.provenance import (
     ConsistencyGuarantee,
     PrecisionClass,
     ProvenanceEnvelope,

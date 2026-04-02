@@ -2,11 +2,11 @@
 
 import pytest
 
-from sdol.connectors.document.generic import GenericDocumentConnector
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.types.context import ContextSlotType
-from sdol.types.errors import InvalidIntentError
-from sdol.types.intent import PointLookupIntent, SemanticSearchIntent
+from provena.connectors.document.generic import GenericDocumentConnector
+from provena.connectors.executor import MockQueryExecutor
+from provena.types.context import ContextSlotType
+from provena.types.errors import InvalidIntentError
+from provena.types.intent import PointLookupIntent, SemanticSearchIntent
 
 
 class TestGenericDocumentConnector:
@@ -58,7 +58,7 @@ class TestGenericDocumentConnector:
             await connector.execute(intent)
 
     def test_query_builder_hybrid_retrieval(self) -> None:
-        from sdol.connectors.document.query import build_search_query
+        from provena.connectors.document.query import build_search_query
         intent = SemanticSearchIntent(
             id="i-1",
             query="machine learning",
@@ -71,7 +71,7 @@ class TestGenericDocumentConnector:
         assert query.keyword_weight == pytest.approx(0.3)
 
     def test_query_builder_reranking(self) -> None:
-        from sdol.connectors.document.query import build_search_query
+        from provena.connectors.document.query import build_search_query
         intent = SemanticSearchIntent(
             id="i-1",
             query="ml",

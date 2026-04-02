@@ -2,8 +2,8 @@
 
 import asyncio
 
-from sdol.mcp.mcp_adapter import MCPAdapter, MCPResponse, MCPServerConfig, MCPToolCall, MockMCPTransport
-from sdol.mcp.response_wrapper import ResponseWrapper
+from provena.mcp.mcp_adapter import MCPAdapter, MCPResponse, MCPServerConfig, MCPToolCall, MockMCPTransport
+from provena.mcp.response_wrapper import ResponseWrapper
 
 
 async def main() -> None:

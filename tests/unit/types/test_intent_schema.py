@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from sdol.types.intent import (
+from provena.types.intent import (
     AggregateAnalysisIntent,
     CompositeIntent,
     EscapeHatchIntent,

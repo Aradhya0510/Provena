@@ -2,14 +2,14 @@
 
 import pytest
 
-from sdol.mcp.mcp_adapter import (
+from provena.mcp.mcp_adapter import (
     MCPAdapter,
     MCPResponse,
     MCPServerConfig,
     MCPToolCall,
     MockMCPTransport,
 )
-from sdol.types.errors import MCPTransportError
+from provena.types.errors import MCPTransportError
 
 
 class TestMCPAdapter:

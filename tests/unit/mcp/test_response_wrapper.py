@@ -1,8 +1,8 @@
 """Tests for ResponseWrapper."""
 
-from sdol.mcp.mcp_adapter import MCPResponse, MCPServerConfig
-from sdol.mcp.response_wrapper import ResponseWrapper
-from sdol.types.provenance import ConsistencyGuarantee, PrecisionClass, RetrievalMethod
+from provena.mcp.mcp_adapter import MCPResponse, MCPServerConfig
+from provena.mcp.response_wrapper import ResponseWrapper
+from provena.types.provenance import ConsistencyGuarantee, PrecisionClass, RetrievalMethod
 
 
 class TestResponseWrapper:

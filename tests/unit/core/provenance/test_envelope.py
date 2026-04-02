@@ -3,8 +3,8 @@
 from pydantic import ValidationError
 import pytest
 
-from sdol.core.provenance.envelope import create_default_envelope, create_envelope
-from sdol.types.provenance import (
+from provena.core.provenance.envelope import create_default_envelope, create_envelope
+from provena.types.provenance import (
     ConsistencyGuarantee,
     PrecisionClass,
     RetrievalMethod,

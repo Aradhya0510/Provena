@@ -2,11 +2,11 @@
 
 import asyncio
 
-from sdol import SDOL, CapabilityRegistry, ContextCompiler, GenericOLTPConnector, SemanticRouter, TrustScorer
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.core.router.cost_estimator import CostEstimator
-from sdol.core.router.intent_decomposer import IntentDecomposer
-from sdol.core.router.query_planner import QueryPlanner
+from provena import SDOL, CapabilityRegistry, ContextCompiler, GenericOLTPConnector, SemanticRouter, TrustScorer
+from provena.connectors.executor import MockQueryExecutor
+from provena.core.router.cost_estimator import CostEstimator
+from provena.core.router.intent_decomposer import IntentDecomposer
+from provena.core.router.query_planner import QueryPlanner
 
 
 async def main() -> None:
@@ -22,11 +22,11 @@ async def main() -> None:
     router = SemanticRouter(planner, compiler, registry)
     sdol = SDOL(router)
 
-    intent = sdol.formulator.point_lookup(
+    intent = provena.formulator.point_lookup(
         "customer", {"customer_id": "C-1042"}, fields=["name", "email"]
     )
 
-    frame = await sdol.query(intent)
+    frame = await provena.query(intent)
 
     print("=== Context Frame ===")
     print(f"  Elements: {frame.stats.total_elements}")
@@ -37,7 +37,7 @@ async def main() -> None:
             print(f"    - {elem.data} (trust: {elem.trust.composite:.2f})")
     print()
     print("=== Epistemic Context ===")
-    print(sdol.get_epistemic_context())
+    print(provena.get_epistemic_context())
 
 
 if __name__ == "__main__":

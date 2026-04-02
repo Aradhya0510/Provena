@@ -2,9 +2,9 @@
 
 from datetime import datetime, timezone
 
-from sdol.core.context.conflict_detector import ConflictDetector
-from sdol.types.context import ContextElement
-from sdol.types.provenance import (
+from provena.core.context.conflict_detector import ConflictDetector
+from provena.types.context import ContextElement
+from provena.types.provenance import (
     ConsistencyGuarantee,
     PrecisionClass,
     ProvenanceEnvelope,

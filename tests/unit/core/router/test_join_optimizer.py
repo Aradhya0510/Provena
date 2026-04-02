@@ -1,8 +1,8 @@
 """Tests for JoinOptimizer."""
 
-from sdol.core.router.join_optimizer import JoinOptimizer, JoinStrategy
-from sdol.types.intent import PointLookupIntent
-from sdol.types.router import ExecutionStep
+from provena.core.router.join_optimizer import JoinOptimizer, JoinStrategy
+from provena.types.intent import PointLookupIntent
+from provena.types.router import ExecutionStep
 
 
 def _make_step(step_id: str, connector_id: str) -> ExecutionStep:

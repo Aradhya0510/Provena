@@ -2,15 +2,15 @@
 
 import pytest
 
-from sdol.agent.agent_sdk import SDOL
-from sdol.connectors.capability_registry import CapabilityRegistry
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.connectors.oltp.generic import GenericOLTPConnector
-from sdol.core.context.context_compiler import ContextCompiler
-from sdol.core.router.cost_estimator import CostEstimator
-from sdol.core.router.intent_decomposer import IntentDecomposer
-from sdol.core.router.query_planner import QueryPlanner
-from sdol.core.router.semantic_router import SemanticRouter
+from provena.agent.agent_sdk import Provena as SDOL
+from provena.connectors.capability_registry import CapabilityRegistry
+from provena.connectors.executor import MockQueryExecutor
+from provena.connectors.oltp.generic import GenericOLTPConnector
+from provena.core.context.context_compiler import ContextCompiler
+from provena.core.router.cost_estimator import CostEstimator
+from provena.core.router.intent_decomposer import IntentDecomposer
+from provena.core.router.query_planner import QueryPlanner
+from provena.core.router.semantic_router import SemanticRouter
 
 
 def _setup_sdol(records=None) -> SDOL:

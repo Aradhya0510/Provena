@@ -2,12 +2,12 @@
 
 import pytest
 
-from sdol.connectors.executor import MockQueryExecutor
-from sdol.connectors.oltp.base import BaseOLTPConnector
-from sdol.types.capability import ConnectorPerformance
-from sdol.types.context import ContextSlotType
-from sdol.types.errors import InvalidIntentError
-from sdol.types.intent import (
+from provena.connectors.executor import MockQueryExecutor
+from provena.connectors.oltp.base import BaseOLTPConnector
+from provena.types.capability import ConnectorPerformance
+from provena.types.context import ContextSlotType
+from provena.types.errors import InvalidIntentError
+from provena.types.intent import (
     AggregateAnalysisIntent,
     MeasureSpec,
     PointLookupIntent,
@@ -15,7 +15,7 @@ from sdol.types.intent import (
     TemporalTrendIntent,
     TimeWindow,
 )
-from sdol.types.provenance import ConsistencyGuarantee
+from provena.types.provenance import ConsistencyGuarantee
 
 
 class StubOLTPConnector(BaseOLTPConnector):

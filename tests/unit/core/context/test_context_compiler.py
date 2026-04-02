@@ -2,10 +2,10 @@
 
 from datetime import datetime, timezone
 
-from sdol.core.context.context_compiler import CompilerInput, ContextCompiler
-from sdol.core.provenance.trust_scorer import TrustScorer
-from sdol.types.context import ContextSlotType
-from sdol.types.provenance import (
+from provena.core.context.context_compiler import CompilerInput, ContextCompiler
+from provena.core.provenance.trust_scorer import TrustScorer
+from provena.types.context import ContextSlotType
+from provena.types.provenance import (
     ConsistencyGuarantee,
     PrecisionClass,
     ProvenanceEnvelope,
