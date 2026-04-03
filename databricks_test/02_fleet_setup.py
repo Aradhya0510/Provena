@@ -386,38 +386,40 @@ else:
 
 # COMMAND ----------
 
-existing_indexes = [
-    idx["name"]
-    for idx in vsc.list_indexes(name=VS_ENDPOINT_NAME).get("vector_indexes", [])
-]
-
 source_table = f"{CATALOG}.{SCHEMA}.maintenance_logs"
-
 spark.sql(f"ALTER TABLE {source_table} SET TBLPROPERTIES (delta.enableChangeDataFeed = true)")
 
-if VS_INDEX_NAME not in existing_indexes:
-    print(f"Creating delta-sync index '{VS_INDEX_NAME}'...")
+# Check if the index already exists (may be on a different endpoint)
+index_endpoint = None
+for ep in vsc.list_endpoints().get("endpoints", []):
     try:
-        vsc.create_delta_sync_index(
-            endpoint_name=VS_ENDPOINT_NAME,
-            index_name=VS_INDEX_NAME,
-            source_table_name=source_table,
-            pipeline_type="TRIGGERED",
-            primary_key="log_id",
-            embedding_source_column="description",
-            embedding_model_endpoint_name=EMBEDDING_MODEL,
-            columns_to_sync=["log_id", "machine_id", "log_date", "fault_category", "severity", "description", "technician_name"],
-        )
-        print("Index creation started. Waiting for initial sync...")
-    except Exception as e:
-        if "already exists" in str(e):
-            print(f"Index already exists (race condition). Triggering sync...")
-            vsc.get_index(endpoint_name=VS_ENDPOINT_NAME, index_name=VS_INDEX_NAME).sync()
-        else:
-            raise
-else:
+        for idx in vsc.list_indexes(name=ep["name"]).get("vector_indexes", []):
+            if idx["name"] == VS_INDEX_NAME:
+                index_endpoint = ep["name"]
+                break
+    except Exception:
+        continue
+    if index_endpoint:
+        break
+
+if index_endpoint:
+    if index_endpoint != VS_ENDPOINT_NAME:
+        print(f"Note: Index '{VS_INDEX_NAME}' found on endpoint '{index_endpoint}' instead of '{VS_ENDPOINT_NAME}'.")
     print(f"Index '{VS_INDEX_NAME}' already exists. Triggering sync...")
-    vsc.get_index(endpoint_name=VS_ENDPOINT_NAME, index_name=VS_INDEX_NAME).sync()
+    vsc.get_index(endpoint_name=index_endpoint, index_name=VS_INDEX_NAME).sync()
+else:
+    print(f"Creating delta-sync index '{VS_INDEX_NAME}' on '{VS_ENDPOINT_NAME}'...")
+    vsc.create_delta_sync_index(
+        endpoint_name=VS_ENDPOINT_NAME,
+        index_name=VS_INDEX_NAME,
+        source_table_name=source_table,
+        pipeline_type="TRIGGERED",
+        primary_key="log_id",
+        embedding_source_column="description",
+        embedding_model_endpoint_name=EMBEDDING_MODEL,
+        columns_to_sync=["log_id", "machine_id", "log_date", "fault_category", "severity", "description", "technician_name"],
+    )
+    print("Index creation started. Waiting for initial sync...")
 
 # COMMAND ----------
 
@@ -428,7 +430,7 @@ else:
 
 import time
 
-idx = vsc.get_index(endpoint_name=VS_ENDPOINT_NAME, index_name=VS_INDEX_NAME)
+idx = vsc.get_index(endpoint_name=index_endpoint or VS_ENDPOINT_NAME, index_name=VS_INDEX_NAME)
 for attempt in range(60):
     status = idx.describe()
     state = status.get("status", {}).get("detailed_state", "UNKNOWN")
