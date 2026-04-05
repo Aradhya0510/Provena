@@ -16,6 +16,7 @@ from provena.types.capability import (
     ConnectorCapabilities,
     ConnectorCapability,
     ConnectorPerformance,
+    EntitySchema,
 )
 from provena.types.connector import ConnectorHealth, ConnectorResult, ConnectorResultMeta
 from provena.types.context import ContextSlotType
@@ -51,6 +52,7 @@ class DatabricksVectorSearchConnector(BaseDocumentConnector):
         score_threshold: float | None = 0.3,
         consistency: ConsistencyGuarantee | None = None,
         staleness_sec: float | None = None,
+        entity_schemas: dict[str, EntitySchema] | None = None,
     ) -> None:
         super().__init__(
             executor=executor,
@@ -65,6 +67,7 @@ class DatabricksVectorSearchConnector(BaseDocumentConnector):
         self._score_threshold = score_threshold
         self._consistency_override = consistency
         self._staleness_override = staleness_sec
+        self._entity_schemas = entity_schemas or {}
 
     @property
     def default_staleness_sec(self) -> float:
@@ -95,6 +98,9 @@ class DatabricksVectorSearchConnector(BaseDocumentConnector):
             ),
             performance=self.get_performance(),
             available_entities=self._available_entities,
+            entity_schemas=self._entity_schemas,
+            consistency_guarantee=self.default_consistency.value,
+            staleness_window_sec=self.default_staleness_sec,
         )
 
     def synthesize_query(self, params: Any) -> DatabricksVSQuery:

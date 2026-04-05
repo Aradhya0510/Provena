@@ -107,6 +107,8 @@ async def main():
         {"region": "central", "sum_revenue": 900_000},
     ])
 
+    from provena import EntitySchema
+
     dbsql = DatabricksDBSQLConnector(
         executor=executor,
         connector_id="databricks.analytics",
@@ -114,6 +116,12 @@ async def main():
         available_entities=["orders", "customers", "revenue_daily"],
         catalog="prod_catalog",
         schema="analytics",
+        entity_schemas={  # optional: enables describe_sources() and schema-aware prompts
+            "orders": EntitySchema(
+                columns=["order_id", "customer_id", "amount", "status", "created_at"],
+                description="Customer orders with fulfillment status",
+            ),
+        },
     )
 
     registry = CapabilityRegistry()
@@ -219,6 +227,12 @@ async def main():
         available_entities=["customers", "products", "sessions"],
         catalog="prod_catalog",
         schema="serving",
+        entity_schemas={  # optional: enables describe_sources()
+            "customers": EntitySchema(
+                columns=["customer_id", "name", "email", "tier", "last_login"],
+                description="Real-time customer registry",
+            ),
+        },
     )
 
     registry = CapabilityRegistry()
@@ -326,6 +340,12 @@ async def main():
         catalog="prod_catalog",
         schema="fleet",
         index_name="prod_catalog.fleet.maintenance_logs_index",
+        entity_schemas={  # optional: enables describe_sources()
+            "maintenance_logs": EntitySchema(
+                columns=["log_id", "machine_id", "description", "fault_category", "severity"],
+                description="Technician maintenance notes with fault classification",
+            ),
+        },
     )
 
     registry = CapabilityRegistry()

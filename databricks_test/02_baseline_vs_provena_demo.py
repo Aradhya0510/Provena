@@ -3,7 +3,7 @@
 # MAGIC # Provena in Action: Seeing the Concepts Work with Real Data
 # MAGIC
 # MAGIC This notebook is an **interactive walkthrough** of every core Provena concept,
-# MAGIC executed against real Databricks tables created by notebook `02_fleet_setup`.
+# MAGIC executed against real Databricks tables created by notebook `01_fleet_setup`.
 # MAGIC
 # MAGIC Unlike the purely educational `00` notebook, this one uses real connectors
 # MAGIC (Lakebase, DBSQL, Vector Search) against real data. Each section isolates
@@ -20,7 +20,7 @@
 # MAGIC | 6 | Semantic Search | Vector Search results with provenance metadata |
 # MAGIC | 7 | Full Picture | Determinism wrapping probabilism — cost summary |
 # MAGIC
-# MAGIC **Prerequisite:** Run `02_fleet_setup` first to create the fleet tables and
+# MAGIC **Prerequisite:** Run `01_fleet_setup` first to create the fleet tables and
 # MAGIC Vector Search index.
 
 # COMMAND ----------
@@ -585,7 +585,7 @@ if frame_conflict.conflicts:
 else:
     print("No field-level conflicts detected.")
     print("(This can happen if the OLAP query returned no rows for today.)")
-    print("Make sure 02_fleet_setup was run recently to seed the conflict row.")
+    print("Make sure 01_fleet_setup was run recently to seed the conflict row.")
 
 # COMMAND ----------
 
@@ -832,7 +832,7 @@ print(json.dumps(cost_summary, indent=2, default=str))
 # MAGIC ---
 # MAGIC ### Next Steps
 # MAGIC
-# MAGIC - **`02_fleet_setup`** — Creates the benchmark data tables and Vector Search index
+# MAGIC - **`01_fleet_setup`** — Creates the benchmark data tables and Vector Search index
 # MAGIC   (run this first if you have not already)
 # MAGIC - **`03_fleet_benchmark`** — Head-to-head agent evaluation: a vanilla MCP agent
 # MAGIC   vs a Provena-enhanced agent answering the same questions, scored by LLM judges

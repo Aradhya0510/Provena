@@ -6,7 +6,7 @@ from typing import Any
 
 from provena.connectors.executor import QueryExecutor
 from provena.connectors.olap.base import BaseOLAPConnector
-from provena.types.capability import ConnectorPerformance
+from provena.types.capability import ConnectorCapability, ConnectorPerformance, EntitySchema
 from provena.types.errors import InvalidIntentError
 from provena.types.intent import AggregateAnalysisIntent, TemporalTrendIntent
 from provena.types.provenance import ConsistencyGuarantee
@@ -37,6 +37,7 @@ class DatabricksDBSQLConnector(BaseOLAPConnector):
         entity_key_fields: tuple[str, ...] | None = None,
         consistency: ConsistencyGuarantee | None = None,
         staleness_sec: float | None = None,
+        entity_schemas: dict[str, EntitySchema] | None = None,
     ) -> None:
         super().__init__(
             executor=executor,
@@ -50,6 +51,7 @@ class DatabricksDBSQLConnector(BaseOLAPConnector):
         self._time_column_map = time_column_map or {}
         self._consistency_override = consistency
         self._staleness_override = staleness_sec
+        self._entity_schemas = entity_schemas or {}
 
     @property
     def default_staleness_sec(self) -> float:
@@ -62,6 +64,14 @@ class DatabricksDBSQLConnector(BaseOLAPConnector):
         if self._consistency_override is not None:
             return self._consistency_override
         return ConsistencyGuarantee.STRONG
+
+    def get_capabilities(self) -> ConnectorCapability:
+        cap = super().get_capabilities()
+        return cap.model_copy(update={
+            "entity_schemas": self._entity_schemas,
+            "consistency_guarantee": self.default_consistency.value,
+            "staleness_window_sec": self.default_staleness_sec,
+        })
 
     def get_performance(self) -> ConnectorPerformance:
         return ConnectorPerformance(

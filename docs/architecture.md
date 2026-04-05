@@ -192,7 +192,8 @@ Every data element carries a `ProvenanceEnvelope`:
 
 - `ConnectorCapabilities` — feature flags (7 booleans: aggregation, windowing, traversal, similarity, inference, temporal bucketing, full-text search)
 - `ConnectorPerformance` — `estimated_latency_ms`, `max_result_cardinality`, `supports_batch_lookup`
-- `ConnectorCapability` — complete declaration: `connector_id`, `connector_type`, `supported_intent_types`, `capabilities`, `performance`, `available_entities`
+- `EntitySchema` — column-level schema for an entity: `columns: list[str]`, `description: str`
+- `ConnectorCapability` — complete declaration: `connector_id`, `connector_type`, `supported_intent_types`, `capabilities`, `performance`, `available_entities`, `entity_schemas: dict[str, EntitySchema]`, `consistency_guarantee: str`, `staleness_window_sec: float | None`
 
 ### Error Hierarchy
 
@@ -223,6 +224,8 @@ The public entry point. Intentionally thin — delegates everything to the route
 | `formulator` | Access to intent builders (`point_lookup`, `aggregate_analysis`, etc.) |
 | `async query(intent) -> ContextFrame` | Delegates to `router.route(intent)`, then `tracker.ingest(frame)` |
 | `get_epistemic_context() -> str` | Returns `tracker.generate_epistemic_prompt()` |
+| `describe_sources() -> str` | Structured catalog of all registered sources, schemas, consistency, and staleness — without querying data |
+| `get_cost_summary() -> dict` | Execution cost summary across all queries in the session |
 | `reset()` | Clears the epistemic tracker for a new session |
 
 ### IntentFormulator

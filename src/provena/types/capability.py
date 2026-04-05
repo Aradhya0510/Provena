@@ -21,6 +21,12 @@ class ConnectorPerformance(BaseModel):
     supports_batch_lookup: bool = False
 
 
+class EntitySchema(BaseModel):
+    """Schema metadata for a single entity (table/collection)."""
+    columns: list[str]
+    description: str = ""
+
+
 class ConnectorCapability(BaseModel):
     connector_id: str
     connector_type: str
@@ -28,3 +34,6 @@ class ConnectorCapability(BaseModel):
     capabilities: ConnectorCapabilities
     performance: ConnectorPerformance
     available_entities: list[str]
+    entity_schemas: dict[str, EntitySchema] = {}
+    consistency_guarantee: str = ""
+    staleness_window_sec: float | None = None

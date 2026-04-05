@@ -5,6 +5,7 @@ from provena.agent.agent_sdk import Provena
 from provena.agent.intent_formulator import IntentFormulator
 from provena.connectors.base_connector import BaseConnector
 from provena.connectors.capability_registry import CapabilityRegistry
+from provena.types.capability import EntitySchema
 from provena.connectors.document.base import BaseDocumentConnector
 from provena.connectors.document.generic import GenericDocumentConnector
 from provena.connectors.olap.base import BaseOLAPConnector
@@ -36,6 +37,7 @@ __all__ = [
     "TrustScorer",
     "EpistemicTracker",
     "CapabilityRegistry",
+    "EntitySchema",
     "BaseConnector",
     "BaseOLAPConnector",
     "BaseOLTPConnector",

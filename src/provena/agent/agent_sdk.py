@@ -89,6 +89,51 @@ class Provena:
         """Get epistemic summary. Inject into agent's system prompt."""
         return self.tracker.generate_epistemic_prompt()
 
+    def describe_sources(self) -> str:
+        """Describe all registered data sources, their schemas, and properties.
+
+        Returns a structured text summary of every connector's entities, columns,
+        consistency guarantees, staleness windows, and capabilities — without
+        querying any data. Use this to answer meta-questions like "what data
+        sources are available?" or "how reliable is the data?" without
+        round-tripping through actual queries.
+        """
+        capabilities = self._router.registry.list_capabilities()
+        if not capabilities:
+            return "## Data Source Catalog\nNo data sources registered."
+
+        lines = ["## Data Source Catalog"]
+        for cap in capabilities:
+            lines.append(f"\n### {cap.connector_id} ({cap.connector_type})")
+            if cap.consistency_guarantee:
+                lines.append(f"- Consistency: {cap.consistency_guarantee}")
+            if cap.staleness_window_sec is not None:
+                lines.append(f"- Staleness window: {cap.staleness_window_sec}s")
+            lines.append(f"- Latency: ~{cap.performance.estimated_latency_ms:.0f}ms")
+
+            cap_flags = []
+            for field_name in cap.capabilities.model_fields:
+                if getattr(cap.capabilities, field_name, False):
+                    cap_flags.append(field_name.replace("supports_", ""))
+            if cap_flags:
+                lines.append(f"- Capabilities: {', '.join(cap_flags)}")
+
+            for entity in cap.available_entities:
+                schema = cap.entity_schemas.get(entity)
+                if schema:
+                    desc = f" — {schema.description}" if schema.description else ""
+                    lines.append(f"- Entity `{entity}`{desc}")
+                    lines.append(f"  Columns: {', '.join(schema.columns)}")
+                else:
+                    lines.append(f"- Entity `{entity}`")
+
+        # Append observed data quality if any queries have been made
+        epistemic = self.tracker.generate_epistemic_prompt()
+        if "No data ingested yet" not in epistemic:
+            lines.append(f"\n{epistemic}")
+
+        return "\n".join(lines)
+
     def get_cost_summary(self) -> dict:
         """Get summary of execution costs across all queries in this session."""
         if not self._cost_records:

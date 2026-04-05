@@ -6,7 +6,7 @@ from typing import Any
 
 from provena.connectors.executor import QueryExecutor
 from provena.connectors.oltp.base import BaseOLTPConnector
-from provena.types.capability import ConnectorPerformance
+from provena.types.capability import ConnectorCapability, ConnectorPerformance, EntitySchema
 from provena.types.errors import InvalidIntentError
 from provena.types.intent import AggregateAnalysisIntent, PointLookupIntent
 from provena.types.provenance import ConsistencyGuarantee
@@ -35,6 +35,7 @@ class DatabricksLakebaseConnector(BaseOLTPConnector):
         catalog: str | None = None,
         schema: str | None = None,
         entity_key_fields: tuple[str, ...] | None = None,
+        entity_schemas: dict[str, EntitySchema] | None = None,
     ) -> None:
         super().__init__(
             executor=executor,
@@ -45,6 +46,7 @@ class DatabricksLakebaseConnector(BaseOLTPConnector):
         )
         self._catalog = catalog
         self._schema = schema
+        self._entity_schemas = entity_schemas or {}
 
     @property
     def default_staleness_sec(self) -> float:
@@ -53,6 +55,14 @@ class DatabricksLakebaseConnector(BaseOLTPConnector):
     @property
     def default_consistency(self) -> ConsistencyGuarantee:
         return ConsistencyGuarantee.READ_COMMITTED
+
+    def get_capabilities(self) -> ConnectorCapability:
+        cap = super().get_capabilities()
+        return cap.model_copy(update={
+            "entity_schemas": self._entity_schemas,
+            "consistency_guarantee": self.default_consistency.value,
+            "staleness_window_sec": self.default_staleness_sec,
+        })
 
     def get_performance(self) -> ConnectorPerformance:
         return ConnectorPerformance(

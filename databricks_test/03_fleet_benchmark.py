@@ -10,7 +10,7 @@
 # MAGIC | **Token-busting cross-paradigm join** | Q1: Avg fuel efficiency of Model X v2.1 + failure themes | Scans 360K raw rows, generic log search | Push-down aggregation + targeted vector search |
 # MAGIC | **Epistemic conflict** | Q2: Is EXC-0342 active? Status + peak temp | Gets contradictory data, picks one or hallucinates | Detects conflict via provenance, resolves by consistency |
 # MAGIC
-# MAGIC **Prerequisite:** Run `02_fleet_setup` first.
+# MAGIC **Prerequisite:** Run `01_fleet_setup` first.
 
 # COMMAND ----------
 
@@ -167,6 +167,8 @@ vs_executor = DatabricksVectorSearchExecutor(VS_ENDPOINT_NAME, VS_INDEX_NAME)
 
 ENTITY_KEYS = ("machine_id",)
 
+from provena import EntitySchema
+
 oltp_connector = DatabricksLakebaseConnector(
     executor=sql_executor,
     connector_id="fleet.oltp",
@@ -175,6 +177,12 @@ oltp_connector = DatabricksLakebaseConnector(
     catalog=CATALOG,
     schema=SCHEMA,
     entity_key_fields=ENTITY_KEYS,
+    entity_schemas={
+        "fleet_machines": EntitySchema(
+            columns=["machine_id", "model", "serial_number", "firmware_version", "status", "region", "gps_lat", "gps_lon", "last_heartbeat_at"],
+            description="Real-time machine registry — status, firmware, GPS",
+        ),
+    },
 )
 
 olap_connector = DatabricksDBSQLConnector(
@@ -191,6 +199,16 @@ olap_connector = DatabricksDBSQLConnector(
     entity_key_fields=ENTITY_KEYS,
     consistency=ConsistencyGuarantee.EVENTUAL,
     staleness_sec=900.0,
+    entity_schemas={
+        "telemetry_readings": EntitySchema(
+            columns=["machine_id", "reading_time", "engine_temp_c", "rpm", "fuel_efficiency_lpkm", "vibration_mm_s", "oil_pressure_psi", "coolant_temp_c"],
+            description="Hourly sensor data — temp, RPM, fuel efficiency",
+        ),
+        "telemetry_daily": EntitySchema(
+            columns=["machine_id", "report_date", "avg_engine_temp", "max_engine_temp", "avg_rpm", "avg_fuel_efficiency", "min_fuel_efficiency", "reading_count", "last_known_status"],
+            description="Pre-aggregated daily metrics (15-min batch lag)",
+        ),
+    },
 )
 
 doc_connector = DatabricksVectorSearchConnector(
@@ -201,6 +219,12 @@ doc_connector = DatabricksVectorSearchConnector(
     catalog=CATALOG,
     schema=SCHEMA,
     index_name=VS_INDEX_NAME,
+    entity_schemas={
+        "maintenance_logs": EntitySchema(
+            columns=["log_id", "machine_id", "log_date", "fault_category", "severity", "description", "technician_name", "resolution_notes"],
+            description="Free-text technician notes + fault categories",
+        ),
+    },
 )
 
 registry = CapabilityRegistry()
@@ -349,13 +373,20 @@ def sdol_machine_lookup(machine_id: str, fields: str = "") -> str:
 
 @tool
 def sdol_fleet_aggregate(entity: str, measures: str, dimensions: str, filters: str = "", order_by: str = "") -> str:
-    """Run an aggregate analysis on telemetry data via Provena push-down.
+    """Run an aggregate analysis via Provena push-down.
+
+    IMPORTANT — each table has DIFFERENT column names:
+      fleet_machines:     machine_id, model, serial_number, firmware_version, status, region, gps_lat, gps_lon, last_heartbeat_at
+      telemetry_readings: machine_id, reading_time, engine_temp_c, rpm, fuel_efficiency_lpkm, vibration_mm_s, oil_pressure_psi, coolant_temp_c
+      telemetry_daily:    machine_id, report_date, avg_engine_temp, max_engine_temp, avg_rpm, avg_fuel_efficiency, min_fuel_efficiency, reading_count, last_known_status
+
     Args:
-        entity: 'telemetry_readings' or 'telemetry_daily'
-        measures: e.g. 'avg(fuel_efficiency_lpkm), max(engine_temp_c)'
+        entity: 'fleet_machines', 'telemetry_readings', or 'telemetry_daily'
+        measures: e.g. for telemetry_daily: 'avg(avg_fuel_efficiency), max(max_engine_temp)'
+                       for fleet_machines: 'count(machine_id)'
         dimensions: e.g. 'machine_id' or 'machine_id,report_date'
         filters: e.g. 'machine_id:eq:EXC-0342; report_date:gte:2025-06-01'
-        order_by: e.g. 'avg_fuel_efficiency_lpkm desc'
+        order_by: e.g. 'avg_fuel_efficiency desc'
     """
     import re as _re
     measure_list = []
@@ -386,9 +417,14 @@ def sdol_fleet_aggregate(entity: str, measures: str, dimensions: str, filters: s
 @tool
 def sdol_telemetry_trend(entity: str, metric: str, window: str = "last_180d", granularity: str = "1M") -> str:
     """Analyze temporal trends in telemetry via Provena DATE_TRUNC push-down.
+
+    IMPORTANT — use the correct column name for each table:
+      telemetry_readings: fuel_efficiency_lpkm, engine_temp_c, rpm, vibration_mm_s, oil_pressure_psi, coolant_temp_c
+      telemetry_daily:    avg_fuel_efficiency, avg_engine_temp, max_engine_temp, avg_rpm, min_fuel_efficiency
+
     Args:
         entity: 'telemetry_readings' or 'telemetry_daily'
-        metric: e.g. 'fuel_efficiency_lpkm', 'engine_temp_c'
+        metric: column name matching the entity (see above)
         window: e.g. 'last_30d', 'last_180d'
         granularity: '1d', '1w', '1M'
     """
@@ -483,6 +519,15 @@ def sdol_data_confidence() -> str:
     """Return overall data confidence summary for all data queried so far."""
     return provena.get_epistemic_context()
 
+@tool
+def sdol_describe_sources() -> str:
+    """Describe all available data sources, their schemas, consistency guarantees,
+    and staleness windows — WITHOUT querying any data.
+
+    Use this FIRST when answering meta-questions about data reliability, source
+    trust, or available columns. This avoids unnecessary data queries."""
+    return provena.describe_sources()
+
 def _parse_filters(raw):
     if not raw or not raw.strip():
         return None
@@ -516,6 +561,7 @@ def _parse_filters(raw):
 sdol_tools = [
     sdol_machine_lookup, sdol_fleet_aggregate, sdol_telemetry_trend,
     sdol_search_logs, sdol_cross_source_status, sdol_sql, sdol_data_confidence,
+    sdol_describe_sources,
 ]
 
 # COMMAND ----------
@@ -590,32 +636,50 @@ You have access to a Databricks lakehouse with the following tables:
 
 {TABLE_SCHEMAS}
 
+IMPORTANT: Each table has its own column names. Always use the exact columns listed above.
+For example, `region` is only in fleet_machines (not telemetry tables), and
+telemetry_daily uses `avg_fuel_efficiency` (not `fuel_efficiency_lpkm` which is in telemetry_readings).
+
 Use `get_table_sample` to fetch rows from tables. You can filter with a WHERE clause.
 Use `search_logs_text` to search maintenance logs by keyword.
+When using IN clauses, pass complete values like 'EXC-0323' (not individual characters).
 Present results clearly with actual values.
 """
+
+SOURCE_CATALOG = provena.describe_sources()
 
 SDOL_PROMPT = f"""You are a fleet reliability analyst assistant enhanced with Provena (Epistemic Provenance for AI Agents).
 
 Provena tracks data provenance (source, freshness, consistency), computes trust scores,
 and automatically detects conflicts between data sources with different consistency guarantees.
 
-{TABLE_SCHEMAS}
+{SOURCE_CATALOG}
 
 Available Provena tools:
 - `sdol_machine_lookup`       — real-time OLTP lookup (strong consistency, <30s stale)
-- `sdol_fleet_aggregate`      — OLAP push-down aggregation (eventual consistency, ~15min stale)
-    measures format: 'avg(fuel_efficiency_lpkm), max(engine_temp_c)'
+- `sdol_fleet_aggregate`      — push-down aggregation on fleet_machines, telemetry_readings, or telemetry_daily
+    measures format: 'avg(column_name), max(column_name)'
     filters format: 'machine_id:eq:EXC-0042; report_date:gte:2025-06-01'
+    Use this to filter fleet_machines by model/firmware/status and to aggregate telemetry.
+    IMPORTANT: each table has DIFFERENT column names — check the schema above.
 - `sdol_telemetry_trend`      — temporal bucketed analysis (DATE_TRUNC push-down)
+    IMPORTANT: use the correct column name for the entity you are querying.
 - `sdol_search_logs`          — semantic search on maintenance logs via Vector Search
 - `sdol_cross_source_status`  — **composite query** that hits BOTH OLTP and OLAP for the
     same machine, automatically detects data conflicts between sources, and resolves them
     using provenance-based heuristics. USE THIS when asked about a machine's current state.
 - `sdol_sql`                  — raw SQL fallback for JOINs ({FQ}.<table>)
-- `sdol_data_confidence`      — overall epistemic summary
+- `sdol_data_confidence`      — overall epistemic summary for data already queried
+- `sdol_describe_sources`     — describe ALL data sources, schemas, and properties WITHOUT
+    querying data. Use this for questions about data reliability, trust, or available columns.
 
 CRITICAL GUIDELINES:
+- For meta-questions about data reliability, trust, or source properties, call
+  `sdol_describe_sources` FIRST — it answers without querying data (zero extra tokens).
+- For cross-paradigm questions (e.g. "fuel efficiency of Model X + maintenance themes"),
+  use `sdol_fleet_aggregate` on fleet_machines to filter by model/firmware, then aggregate
+  telemetry and search logs for those machines. Avoid `sdol_sql` when typed tools suffice.
+- ALWAYS use the correct column names from the schema above. Each table is different.
 - When Provena detects a conflict between sources, ALWAYS explain it transparently.
   State which source you trust more and why (consistency level, freshness).
 - Always cite trust scores, source system, and freshness in your answers.

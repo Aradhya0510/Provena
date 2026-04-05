@@ -249,6 +249,14 @@ ConnectorCapability(
         supports_batch_lookup=False,
     ),
     available_entities=["orders", "revenue"],  # tables/collections this connector has
+    entity_schemas={                          # optional: column-level schema per entity
+        "orders": EntitySchema(
+            columns=["order_id", "customer_id", "amount", "status", "created_at"],
+            description="Customer orders",
+        ),
+    },
+    consistency_guarantee="strong",           # optional: declared consistency level
+    staleness_window_sec=600.0,               # optional: declared staleness window
 )
 ```
 

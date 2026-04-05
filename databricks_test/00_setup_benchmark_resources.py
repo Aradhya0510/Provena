@@ -938,7 +938,7 @@ print(epistemic)
 # MAGIC
 # MAGIC These concepts power the benchmark in the companion notebooks:
 # MAGIC
-# MAGIC - **02_fleet_setup** -- Creates real Databricks tables (500 machines, 360K telemetry
+# MAGIC - **01_fleet_setup** -- Creates real Databricks tables (500 machines, 360K telemetry
 # MAGIC   readings, 90K daily aggregates, 5K maintenance logs) plus a Vector Search index.
 # MAGIC   Seeds the OLTP/OLAP conflict for EXC-0342.
 # MAGIC
@@ -947,5 +947,5 @@ print(epistemic)
 # MAGIC   modes that Provena structurally solves: token-busting cross-paradigm joins and
 # MAGIC   epistemic conflicts.
 # MAGIC
-# MAGIC Run `02_fleet_setup` first to create the data, then `03_fleet_benchmark` to see
+# MAGIC Run `01_fleet_setup` first to create the data, then `03_fleet_benchmark` to see
 # MAGIC the evaluation results side-by-side.
